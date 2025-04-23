@@ -1,6 +1,6 @@
 module Main where
 
-import YatsuhashiSR (Item, ItemsCollection, reviewItem)
+import TurboM (Item, ItemsCollection, reviewItem)
 
 -- Type alias for the specific instance where question and answer are Strings
 type StringItem = Item String String

@@ -1,4 +1,4 @@
-module YatsuhashiSR (Item (..), ItemsCollection (..), ReviewGrade (..), reviewItem) where
+module TurboM (Item (..), ItemsCollection (..), ReviewGrade (..), reviewItem) where
 
 data Item q a = Item
   { question :: q,
