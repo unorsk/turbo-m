@@ -21,7 +21,7 @@ library
 
   exposed-modules:  TurboM
 
-  build-depends:    base ^>=4.20.0.0
+  build-depends:    base ^>=4.21.0.0
 
   hs-source-dirs:   lib
 
@@ -33,7 +33,7 @@ executable turbo-m
   main-is:          Main.hs
 
   build-depends:
-    , base        ^>=4.20.0.0
+    , base        ^>=4.21.0.0
     , brick
     , bytestring
     , directory
@@ -60,5 +60,5 @@ test-suite turbo-m-test
 
   -- Test dependencies.
   build-depends:
-    , base        ^>=4.20.0.0
+    , base        ^>=4.21.0.0
     , turbo-m
