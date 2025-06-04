@@ -1,13 +1,87 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StrictData #-}
+
 module Main where
 
-import TurboM (Item, ItemsCollection, reviewItem)
+import Data.Char (isSpace, toLower)
+import Data.Foldable (traverse_)
+import Data.List qualified
+import Data.List.Split (splitOn)
+import Data.Maybe (fromMaybe)
+import System.Console.Haskeline
+  ( InputT,
+    defaultSettings,
+    getInputLine,
+    outputStrLn,
+    runInputT,
+  )
+import System.Environment (getArgs)
+import TurboM (Item(..), ItemsCollection(..), reviewItem)
+
+type Repl a = InputT IO a
 
 -- Type alias for the specific instance where question and answer are Strings
 type StringItem = Item String String
-
+-- Should be a list of items
 type StringItemsCollection = ItemsCollection String String
 
 -- mem simple
 main :: IO ()
 main = do
-  putStrLn "Hello, Haskell!"
+  (path, _) <- fromMaybe (error "Error: No arguments provided. Please specify the training set path.") . Data.List.uncons <$> getArgs
+  itms <- readItemsFromFile path "##"
+  putStrLn $ "File: " ++ path
+  putStrLn $ "Rounds: " ++ show times <> " Items: " <> show (length $ items itms)
+  doTraining itms times
+  where
+    times = 3
+
+doTraining :: StringItemsCollection -> Int -> IO ()
+doTraining _ 0 = return ()
+doTraining itms times = do
+  runInputT defaultSettings $ traverse_ readAndCheck (items itms)
+  doTraining itms (times - 1)
+
+leftPad :: Int -> String -> String
+leftPad n s = replicate n ' ' ++ s
+
+printError :: Int -> String -> String -> Repl ()
+printError offset expected _actual = outputStrLn $ leftPad offset expected
+
+isCharInString :: Char -> String -> Bool
+isCharInString _ [] = False -- base case: empty string, character not found
+isCharInString c (x : xs) -- recursive case: check first character of string
+  | c == x = True -- character found
+  | otherwise = isCharInString c xs -- character not found yet, check rest of string
+
+stripSpacesToLowerCase :: String -> String
+stripSpacesToLowerCase =
+  map toLower
+    . filter (not . (\c -> isSpace c || isCharInString c "!¡.,?¿:;-–'\"()"))
+
+readAndCheck :: StringItem -> Repl Bool
+readAndCheck item = do
+  minput <- getInputLine $ question item ++ "~ "
+  case minput of
+    Nothing -> return False
+    Just input ->
+      let result = stripSpacesToLowerCase input == stripSpacesToLowerCase (answer item)
+       in do
+            if not result
+              then printError (length (question item) + 2) (answer item) input
+              else return ()
+            return result
+
+shuffleLearningItems :: StringItemsCollection -> IO StringItemsCollection
+shuffleLearningItems = return
+
+readItemsFromFile :: String -> String -> IO StringItemsCollection
+readItemsFromFile filePath separator = do
+  fileContents <- readFile filePath
+  let itms = map parseLine $ lines fileContents
+  return $ (ItemsCollection "DICT TOOD" itms :: StringItemsCollection)
+  where
+    parseLine :: String -> StringItem
+    parseLine line = (Item (last parts) (head parts) 0 0 0 Nothing) :: StringItem -- <- TODO
+      where
+        parts = splitOn separator line

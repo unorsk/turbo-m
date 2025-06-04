@@ -34,12 +34,8 @@ executable turbo-m
 
   build-depends:
     , base        ^>=4.21.0.0
-    , brick
-    , bytestring
-    , directory
-    , filepath
-    , text
-    , vty
+    , haskeline
+    , split
     , turbo-m
 
   hs-source-dirs:   app
