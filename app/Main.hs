@@ -23,6 +23,7 @@ import System.FilePath ((</>))
 import TurboM (Item(..), ItemsCollection(..))
 import System.Random.Shuffle (shuffleM)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad (void)
 
 type Repl a = InputT IO a
 
@@ -77,14 +78,9 @@ sayText text = do
   let cacheDir = homeDir </> ".turbo-m" </> "cache"
       wavFile = cacheDir </> (text ++ ".wav")
   fileExists <- doesFileExist wavFile
-  if fileExists
-    then do
-      print $ "afplay " ++ wavFile
-      _ <- spawnCommand $ "afplay " ++ "\"" ++ wavFile ++ "\""
-      return ()
-    else do
-      _ <- spawnCommand $ "say -v Anna " ++ "\"" ++ text ++ "\""
-      return ()
+  void $ spawnCommand $ if fileExists
+    then "afplay " ++ "\"" ++ wavFile ++ "\""
+    else "say -v Anna " ++ "\"" ++ text ++ "\""
 
 readAndCheck :: StringItem -> Repl Bool
 readAndCheck item = do
