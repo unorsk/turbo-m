@@ -22,11 +22,13 @@ executable turbo-m
   main-is:          Main.hs
   build-depends:
     , base            ^>=4.21.0.0
+    , directory
+    , filepath
     , haskeline
+    , process
     , random-shuffle
     , split
     , turbo-m
-    , process
 
   hs-source-dirs:   app
 

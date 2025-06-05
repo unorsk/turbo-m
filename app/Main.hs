@@ -3,11 +3,12 @@
 
 module Main where
 
-import Data.Char (isSpace, toLower)
+import Data.Char (isSpace, toLower, ord)
 import Data.Foldable (traverse_)
 import Data.List qualified
 import Data.List.Split (splitOn)
 import Data.Maybe (fromMaybe)
+import Numeric (showHex)
 import System.Console.Haskeline
   ( InputT,
     defaultSettings,
@@ -15,9 +16,11 @@ import System.Console.Haskeline
     outputStrLn,
     runInputT,
   )
-import System.Environment (getArgs)
-import System.Process (callCommand)
-import TurboM (Item(..), ItemsCollection(..), reviewItem)
+import System.Environment (getArgs, getEnv)
+import System.Process (spawnCommand)
+import System.Directory (doesFileExist)
+import System.FilePath ((</>))
+import TurboM (Item(..), ItemsCollection(..))
 import System.Random.Shuffle (shuffleM)
 import Control.Monad.IO.Class (liftIO)
 
@@ -70,8 +73,18 @@ stripSpacesToLowerCase =
 
 sayText :: String -> IO ()
 sayText text = do
-  -- print $ "say -v Anna " ++ text
-  callCommand $ "say -v Anna " ++ text
+  homeDir <- getEnv "HOME"
+  let cacheDir = homeDir </> ".turbo-m" </> "cache"
+      wavFile = cacheDir </> (text ++ ".wav")
+  fileExists <- doesFileExist wavFile
+  if fileExists
+    then do
+      print $ "afplay " ++ wavFile
+      _ <- spawnCommand $ "afplay " ++ "\"" ++ wavFile ++ "\""
+      return ()
+    else do
+      _ <- spawnCommand $ "say -v Anna " ++ "\"" ++ text ++ "\""
+      return ()
 
 readAndCheck :: StringItem -> Repl Bool
 readAndCheck item = do
