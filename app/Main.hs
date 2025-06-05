@@ -16,8 +16,10 @@ import System.Console.Haskeline
     runInputT,
   )
 import System.Environment (getArgs)
+import System.Process (callCommand)
 import TurboM (Item(..), ItemsCollection(..), reviewItem)
 import System.Random.Shuffle (shuffleM)
+import Control.Monad.IO.Class (liftIO)
 
 type Repl a = InputT IO a
 
@@ -40,8 +42,14 @@ main = do
 doTraining :: StringItemsCollection -> Int -> IO ()
 doTraining _ 0 = return ()
 doTraining itms times = do
-  runInputT defaultSettings $ traverse_ readAndCheck (items itms)
+  runInputT defaultSettings $ traverse_ readAndCheckWithSpeech (items itms)
   doTraining itms (times - 1)
+
+readAndCheckWithSpeech :: StringItem -> Repl Bool
+readAndCheckWithSpeech item = do
+  result <- readAndCheck item
+  liftIO $ sayText (answer item)
+  return result
 
 leftPad :: Int -> String -> String
 leftPad n s = replicate n ' ' ++ s
@@ -59,6 +67,11 @@ stripSpacesToLowerCase :: String -> String
 stripSpacesToLowerCase =
   map toLower
     . filter (not . (\c -> isSpace c || isCharInString c "!¡.,?¿:;-–'\"()"))
+
+sayText :: String -> IO ()
+sayText text = do
+  -- print $ "say -v Anna " ++ text
+  callCommand $ "say -v Anna " ++ text
 
 readAndCheck :: StringItem -> Repl Bool
 readAndCheck item = do
