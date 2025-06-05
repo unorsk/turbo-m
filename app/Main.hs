@@ -85,13 +85,13 @@ readAndCheck item = do
 shuffleLearningItems :: StringItemsCollection -> IO StringItemsCollection
 shuffleLearningItems itemsCollection = do
   shuffledItems <- shuffleM $ items itemsCollection
-  return (ItemsCollection (collectionName itemsCollection) shuffledItems :: StringItemsCollection)
+  return $ ItemsCollection (collectionName itemsCollection) shuffledItems
 
 readItemsFromFile :: String -> String -> IO StringItemsCollection
 readItemsFromFile filePath separator = do
   fileContents <- readFile filePath
   let itms = map parseLine $ lines fileContents
-  return $ (ItemsCollection "DICT TOOD" itms :: StringItemsCollection)
+  return $ ItemsCollection "DICT TOOD" itms
   where
     parseLine :: String -> StringItem
     parseLine line = (Item (last parts) (head parts) 0 0 0 Nothing) :: StringItem -- <- TODO

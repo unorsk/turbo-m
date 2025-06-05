@@ -31,12 +31,14 @@ stripSpacesToLowerCase =
     . filter (not . (\c -> isSpace c || isCharInString c "!¡.,?¿:;-–'\"()"))
 
 -- Typeclass for input validation strategies
-class InputValidator a where
-  validateInput :: a -> a -> Bool
+class Eq a => InputValidator a where
+    normalize :: a -> a
+    validateInput :: a -> a -> Bool
+    validateInput x y = normalize x == normalize y
 
 -- Instance for String comparison with normalization
 instance InputValidator String where
-  validateInput input expected = stripSpacesToLowerCase input == stripSpacesToLowerCase expected
+  normalize = stripSpacesToLowerCase
 
 -- Enum to represent review grades
 data ReviewGrade = Again | Hard | Good | Easy deriving (Show, Eq)
