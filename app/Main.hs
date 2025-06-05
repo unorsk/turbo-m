@@ -3,12 +3,10 @@
 
 module Main where
 
-import Data.Char (isSpace, toLower, ord)
 import Data.Foldable (traverse_)
 import Data.List qualified
 import Data.List.Split (splitOn)
 import Data.Maybe (fromMaybe)
-import Numeric (showHex)
 import System.Console.Haskeline
   ( InputT,
     defaultSettings,
@@ -20,7 +18,7 @@ import System.Environment (getArgs, getEnv)
 import System.Process (spawnCommand)
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
-import TurboM (Item(..), ItemsCollection(..))
+import TurboM (Item(..), ItemsCollection(..), InputValidator(..))
 import System.Random.Shuffle (shuffleM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad (void)
@@ -61,17 +59,6 @@ leftPad n s = replicate n ' ' ++ s
 printError :: Int -> String -> String -> Repl ()
 printError offset expected _actual = outputStrLn $ leftPad offset expected
 
-isCharInString :: Char -> String -> Bool
-isCharInString _ [] = False -- base case: empty string, character not found
-isCharInString c (x : xs) -- recursive case: check first character of string
-  | c == x = True -- character found
-  | otherwise = isCharInString c xs -- character not found yet, check rest of string
-
-stripSpacesToLowerCase :: String -> String
-stripSpacesToLowerCase =
-  map toLower
-    . filter (not . (\c -> isSpace c || isCharInString c "!¡.,?¿:;-–'\"()"))
-
 sayText :: String -> IO ()
 sayText text = do
   homeDir <- getEnv "HOME"
@@ -88,7 +75,7 @@ readAndCheck item = do
   case minput of
     Nothing -> return False
     Just input ->
-      let result = stripSpacesToLowerCase input == stripSpacesToLowerCase (answer item)
+      let result = validateInput input $ answer item
        in do
             if not result
               then printError (length (question item) + 2) (answer item) input

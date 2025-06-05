@@ -1,4 +1,6 @@
-module TurboM (Item (..), ItemsCollection (..), ReviewGrade (..), reviewItem) where
+module TurboM (Item (..), ItemsCollection (..), ReviewGrade (..), reviewItem, InputValidator (..), stripSpacesToLowerCase) where
+
+import Data.Char (isSpace, toLower)
 
 data Item q a = Item
   { question :: q,
@@ -15,6 +17,26 @@ data ItemsCollection q a = ItemsCollection
     items :: [Item q a]
   }
   deriving (Show, Eq)
+
+-- Helper functions for string normalization
+isCharInString :: Char -> String -> Bool
+isCharInString _ [] = False
+isCharInString c (x : xs)
+  | c == x = True
+  | otherwise = isCharInString c xs
+
+stripSpacesToLowerCase :: String -> String
+stripSpacesToLowerCase =
+  map toLower
+    . filter (not . (\c -> isSpace c || isCharInString c "!¡.,?¿:;-–'\"()"))
+
+-- Typeclass for input validation strategies
+class InputValidator a where
+  validateInput :: a -> a -> Bool
+
+-- Instance for String comparison with normalization
+instance InputValidator String where
+  validateInput input expected = stripSpacesToLowerCase input == stripSpacesToLowerCase expected
 
 -- Enum to represent review grades
 data ReviewGrade = Again | Hard | Good | Easy deriving (Show, Eq)
