@@ -17,6 +17,7 @@ import System.Console.Haskeline
   )
 import System.Environment (getArgs)
 import TurboM (Item(..), ItemsCollection(..), reviewItem)
+import System.Random.Shuffle (shuffleM)
 
 type Repl a = InputT IO a
 
@@ -29,7 +30,7 @@ type StringItemsCollection = ItemsCollection String String
 main :: IO ()
 main = do
   (path, _) <- fromMaybe (error "Error: No arguments provided. Please specify the training set path.") . Data.List.uncons <$> getArgs
-  itms <- readItemsFromFile path "##"
+  itms <- (readItemsFromFile path "##") >>= shuffleLearningItems
   putStrLn $ "File: " ++ path
   putStrLn $ "Rounds: " ++ show times <> " Items: " <> show (length $ items itms)
   doTraining itms times
@@ -73,7 +74,9 @@ readAndCheck item = do
             return result
 
 shuffleLearningItems :: StringItemsCollection -> IO StringItemsCollection
-shuffleLearningItems = return
+shuffleLearningItems itemsCollection = do
+  shuffledItems <- shuffleM $ items itemsCollection
+  return (ItemsCollection (collectionName itemsCollection) shuffledItems :: StringItemsCollection)
 
 readItemsFromFile :: String -> String -> IO StringItemsCollection
 readItemsFromFile filePath separator = do
