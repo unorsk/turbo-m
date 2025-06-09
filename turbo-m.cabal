@@ -12,9 +12,11 @@ common warnings
 
 library
   import:           warnings
-  exposed-modules:  TurboM
-  build-depends:    base ^>=4.21.0.0
-  hs-source-dirs:   lib
+  exposed-modules:  TurboM.Types
+  build-depends:
+    base ^>=4.21.0.0,
+    process
+  hs-source-dirs:   src/
   default-language: GHC2024
 
 executable turbo-m

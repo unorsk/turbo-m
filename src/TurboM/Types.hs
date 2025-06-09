@@ -1,6 +1,8 @@
-module TurboM (Item (..), ItemsCollection (..), ReviewGrade (..), reviewItem, InputValidator (..), stripSpacesToLowerCase) where
+module TurboM.Types (Item (..), ItemsCollection (..), ReviewGrade (..), reviewItem, InputValidator (..), TextToSpeech(..), stripSpacesToLowerCase) where
 
 import Data.Char (isSpace, toLower)
+import System.Process (spawnCommand)
+import Control.Monad (void)
 
 data Item q a = Item
   { question :: q,
@@ -30,15 +32,21 @@ stripSpacesToLowerCase =
   map toLower
     . filter (not . (\c -> isSpace c || isCharInString c "!¡.,?¿:;-–'\"()"))
 
+data HowToSay = MacSay |  GeminiSay
+
+class TextToSpeech w h where
+  say :: w -> h -> IO ()
+
+instance TextToSpeech String HowToSay where
+  say w _h = void $ spawnCommand $ "say -v Anna " ++ "\"" ++ w ++ "\""
+
 -- Typeclass for input validation strategies
-class Eq a => InputValidator a where
-    normalize :: a -> a
-    validateInput :: a -> a -> Bool
-    validateInput x y = normalize x == normalize y
+class InputValidator q a where
+    validateInput :: q -> a -> Bool
 
 -- Instance for String comparison with normalization
-instance InputValidator String where
-  normalize = stripSpacesToLowerCase
+instance InputValidator String String where
+  validateInput q a = stripSpacesToLowerCase q == stripSpacesToLowerCase a
 
 -- Enum to represent review grades
 data ReviewGrade = Again | Hard | Good | Easy deriving (Show, Eq)
