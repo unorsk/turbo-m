@@ -1,16 +1,24 @@
-module TurboM.Types (Item (..), ItemsCollection (..), ReviewGrade (..), reviewItem, InputValidator (..), TextToSpeech(..), stripSpacesToLowerCase) where
+module TurboM.Types (Item (..), ItemsCollection (..), FSRSRating (..), CardState (..), InputValidator (..), TextToSpeech(..), stripSpacesToLowerCase, question, answer) where
 
 import Data.Char (isSpace, toLower)
 import System.Process (spawnCommand)
 import Control.Monad (void)
+import Data.Time
+import Database.SQLite.Simple.FromField
+import Database.SQLite.Simple.ToField
 
 data Item q a = Item
-  { question :: q,
-    answer :: a,
-    easinessFactor :: Double,
-    repetitions :: Int,
-    interval :: Int,
-    dueDate :: Maybe String -- Optional due date for the item
+  { itemQuestion :: q
+  , itemAnswer :: a
+  , itemDifficulty :: Double        -- 1-10 scale
+  , itemStability :: Double         -- days until 90% retrievability
+  , itemDueDate :: Maybe UTCTime    -- next review date
+  , itemElapsedDays :: Int         -- days since last review
+  , itemScheduledDays :: Int       -- interval between reviews
+  , itemReps :: Int                -- total review count
+  , itemLapses :: Int              -- times forgotten
+  , itemState :: CardState         -- current learning state
+  , itemLastReview :: Maybe UTCTime -- last review timestamp
   }
   deriving (Show, Eq)
 
@@ -48,32 +56,45 @@ class InputValidator q a where
 instance InputValidator String String where
   validateInput q a = stripSpacesToLowerCase q == stripSpacesToLowerCase a
 
--- Enum to represent review grades
-data ReviewGrade = Again | Hard | Good | Easy deriving (Show, Eq)
+-- Helper function to get question from Item
+question :: Item q a -> q
+question = itemQuestion
 
--- Function to update the easiness factor based on the review grade
-updateEasinessFactor :: Double -> ReviewGrade -> Double
-updateEasinessFactor ef grade =
-  let q = case grade of
-        Again -> 0 :: Integer
-        Hard -> 3
-        Good -> 4
-        Easy -> 5
-      newEf = ef - 0.8 + 0.28 * fromIntegral q - 0.02 * fromIntegral q * fromIntegral q
-   in max 1.3 newEf
+-- Helper function to get answer from Item
+answer :: Item q a -> a
+answer = itemAnswer
 
--- Function to review an item and update its state
-reviewItem :: Item q a -> ReviewGrade -> Item q a
-reviewItem item grade =
-  let newRepetitions = if grade == Again then 0 else repetitions item + 1
-      newEasinessFactor = updateEasinessFactor (easinessFactor item) grade
-      newInterval = case newRepetitions of
-        0 -> 0
-        1 -> 1
-        2 -> 6
-        _ -> round $ fromIntegral (interval item) * newEasinessFactor
-   in item
-        { repetitions = newRepetitions,
-          easinessFactor = newEasinessFactor,
-          interval = newInterval
-        }
+-- FSRS Rating system (simplified to Easy/Hard initially)
+data FSRSRating = Easy | Hard deriving (Show, Eq, Enum)
+
+-- FSRS card state
+data CardState = New | Learning | Review | Relearning deriving (Show, Eq)
+
+-- ToField instances for database storage
+instance ToField FSRSRating where
+  toField Easy = toField ("Easy" :: String)
+  toField Hard = toField ("Hard" :: String)
+
+instance FromField FSRSRating where
+  fromField f = do
+    s <- fromField f
+    case s of
+      "Easy" -> return Easy
+      "Hard" -> return Hard
+      _ -> fail "Invalid FSRSRating"
+
+instance ToField CardState where
+  toField New = toField ("New" :: String)
+  toField Learning = toField ("Learning" :: String)
+  toField Review = toField ("Review" :: String)
+  toField Relearning = toField ("Relearning" :: String)
+
+instance FromField CardState where
+  fromField f = do
+    s <- fromField f
+    case s of
+      "New" -> return New
+      "Learning" -> return Learning
+      "Review" -> return Review
+      "Relearning" -> return Relearning
+      _ -> fail "Invalid CardState"

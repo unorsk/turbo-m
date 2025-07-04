@@ -12,10 +12,20 @@ common warnings
 
 library
   import:           warnings
-  exposed-modules:  TurboM.Types
+  exposed-modules:
+    TurboM.Database
+    TurboM.FSRS
+    TurboM.Types
+
   build-depends:
-    base ^>=4.21.0.0,
-    process
+    , base           ^>=4.21.0.0
+    , bytestring
+    , directory
+    , filepath
+    , process
+    , sqlite-simple
+    , time
+
   hs-source-dirs:   src/
   default-language: GHC2024
 
@@ -23,13 +33,16 @@ executable turbo-m
   import:           warnings
   main-is:          Main.hs
   build-depends:
-    , base            ^>=4.21.0.0
+    , base                  ^>=4.21.0.0
     , directory
     , filepath
     , haskeline
+    , optparse-applicative
     , process
     , random-shuffle
     , split
+    , sqlite-simple
+    , time
     , turbo-m
 
   hs-source-dirs:   app
