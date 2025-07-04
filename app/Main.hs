@@ -12,7 +12,7 @@ import System.Console.Haskeline
     runInputT,
   )
 import System.Environment (getEnv)
-import System.Process (spawnCommand)
+import System.Process (spawnCommand, callCommand)
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
 import Text.EditDistance (levenshteinDistance, defaultEditCosts)
@@ -130,40 +130,89 @@ studyCategory category troubleWords limit = do
       fsrsParams <- getFSRSParameters
       shuffledItems <- shuffleM items
       let sessionItems = take limit shuffledItems
+          totalSessionItems = length sessionItems
           initialCorrectnessMap = Map.fromList $ map (\i -> (itemId i, 0)) sessionItems
       
-      putStrLn $ "Category: " ++ category
-      putStrLn $ "Items in this session: " ++ show (length sessionItems)
+      -- Clear the screen initially before starting the session
+      callCommand "clear"
       
-      runInputT defaultSettings $ studyLoop fsrsParams sessionItems initialCorrectnessMap
+      runInputT defaultSettings $ studyLoop fsrsParams totalSessionItems Nothing sessionItems initialCorrectnessMap
 
 -- The main study loop
-studyLoop :: FSRSParameters -> [StringItem] -> Map.Map (Maybe Int) Int -> Repl ()
-studyLoop _ [] _ = do
+studyLoop :: FSRSParameters -> Int -> Maybe (StringItem, FSRSRating) -> [StringItem] -> Map.Map (Maybe Int) Int -> Repl ()
+studyLoop _ _ _ [] _ = do
+  liftIO $ callCommand "clear"
   outputStrLn "Session complete! Well done."
-studyLoop fsrsParams (item:restOfQueue) correctnessMap = do
+studyLoop fsrsParams totalItems previousResult (item:restOfQueue) correctnessMap = do
+  -- Clear screen and draw UI
+  liftIO $ callCommand "clear"
+  let masteredCount = Map.size $ Map.filter (>= 2) correctnessMap
+  liftIO $ drawProgressBar totalItems masteredCount
+  
+  -- Show feedback from the previous turn, if it exists
+  case previousResult of
+    Just (prevItem, prevRating) -> liftIO $ displayPreviousFeedback prevRating prevItem
+    Nothing -> outputStrLn "" -- Start with a blank line for spacing
+  
   rating <- getRatingFromUser item
   updatedItem <- liftIO $ reviewItemFSRS fsrsParams item rating
 
   -- Always update the database after every single review
   liftIO $ updateItemAfterReview updatedItem
   liftIO $ logReview updatedItem rating
-
+  
+  -- Provide immediate audio feedback
+  liftIO $ sayText (answer item)
+  
   let currentCorrectCount = fromMaybe 0 (Map.lookup (itemId updatedItem) correctnessMap)
       isCorrect = rating == Good || rating == Easy
 
-  if isCorrect then do
-    let newCorrectCount = currentCorrectCount + 1
-    if newCorrectCount >= 2 then do
-      -- Mastered for the session, remove from queue
-      outputStrLn "Mastered for this session!"
-      studyLoop fsrsParams restOfQueue (Map.insert (itemId updatedItem) newCorrectCount correctnessMap)
-    else do
-      -- Needs more correct answers, move to back of the queue
-      studyLoop fsrsParams (restOfQueue ++ [updatedItem]) (Map.insert (itemId updatedItem) newCorrectCount correctnessMap)
-  else do -- Incorrect (Again or Hard)
-    -- Reset correct count and move to back of the queue
-    studyLoop fsrsParams (restOfQueue ++ [updatedItem]) (Map.insert (itemId updatedItem) 0 correctnessMap)
+  let (nextQueue, nextCorrectnessMap) =
+        if isCorrect then
+          let newCorrectCount = currentCorrectCount + 1
+          in if newCorrectCount >= 2 then
+               -- Mastered: remove from queue
+               (restOfQueue, Map.insert (itemId updatedItem) newCorrectCount correctnessMap)
+             else
+               -- Correct but not mastered: move to back
+               (restOfQueue ++ [updatedItem], Map.insert (itemId updatedItem) newCorrectCount correctnessMap)
+        else
+          -- Incorrect: reset count and move to back
+          (restOfQueue ++ [updatedItem], Map.insert (itemId updatedItem) 0 correctnessMap)
+
+  -- Loop with the result of this turn as the new 'previousResult'
+  studyLoop fsrsParams totalItems (Just (updatedItem, rating)) nextQueue nextCorrectnessMap
+
+-- Display feedback for the previous item, positioned below the progress bar
+displayPreviousFeedback :: FSRSRating -> StringItem -> IO ()
+displayPreviousFeedback rating item = do
+  let feedbackText = case rating of
+        Easy  -> "Correct: " ++ question item ++ " -> " ++ answer item
+        Good  -> "Typo: " ++ question item ++ " -> " ++ answer item
+        Hard  -> "Incorrect: " ++ question item ++ " -> " ++ answer item
+        Again -> "Skipped: " ++ question item ++ " -> " ++ answer item
+  putStrLn feedbackText
+  putStrLn "" -- Add a blank line for spacing
+
+-- Draw a progress bar
+drawProgressBar :: Int -> Int -> IO ()
+drawProgressBar total mastered = do
+  let barWidth = 50
+      progress = if total > 0 then fromIntegral mastered / fromIntegral total else 0
+      filledWidth = round (progress * fromIntegral barWidth)
+      emptyWidth = barWidth - filledWidth
+      
+      filledChars = replicate filledWidth '━'
+      emptyChars = replicate emptyWidth '─'
+      
+      -- ANSI escape codes for colors
+      blue = "\x1b[34m"
+      grey = "\x1b[90m"
+      reset = "\x1b[0m"
+      
+  putStrLn $ blue ++ filledChars ++ grey ++ emptyChars ++ reset
+
+
 
 
 -- Get rating from user based on Levenshtein distance
@@ -179,13 +228,10 @@ getRatingFromUser item = do
           distance = levenshteinDistance defaultEditCosts normalizedInput normalizedAnswer
       
       if distance == 0
-        then do
-          return Easy
+        then return Easy
         else if distance <= 2 -- Allow for small typos
-          then do
-            return Good
-          else do
-            return Hard
+          then return Good
+          else return Hard
 
 
 
