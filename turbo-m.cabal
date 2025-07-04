@@ -36,6 +36,7 @@ executable turbo-m
   main-is:          Main.hs
   build-depends:
     , base                  ^>=4.21.0.0
+    , containers
     , directory
     , edit-distance
     , filepath

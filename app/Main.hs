@@ -3,7 +3,6 @@
 
 module Main where
 
-import Data.Foldable (traverse_)
 import Data.List.Split (splitOn)
 import System.Console.Haskeline
   ( InputT,
@@ -22,6 +21,8 @@ import TurboM.Database
 import TurboM.FSRS
 import System.Random.Shuffle (shuffleM)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 import Control.Monad (void)
 import Options.Applicative
 
@@ -36,6 +37,7 @@ data Options = Options
   , optImport :: Maybe String
   , optTroubleWords :: Bool
   , optListCategories :: Bool
+  , optLimit :: Int
   } deriving (Show)
 
 -- Command line parser
@@ -59,6 +61,13 @@ options = Options
       ( long "list-categories"
      <> short 'l'
      <> help "List available categories" )
+  <*> option auto
+      ( long "limit"
+     <> short 'n'
+     <> metavar "N"
+     <> value 12
+     <> showDefault
+     <> help "Limit the number of items in a study session" )
 
 parserInfo :: ParserInfo Options
 parserInfo = info (options <**> helper)
@@ -72,33 +81,25 @@ main = do
   opts <- execParser parserInfo
   initializeDatabase
   
-  case opts of
-    -- List categories
-    Options _ _ _ True -> do
-      categories <- getCategories
-      if null categories
-        then putStrLn "No categories found. Import some vocabulary first."
-        else do
-          putStrLn "Available categories:"
-          mapM_ (putStrLn . ("  " ++)) categories
-    
-    -- Import file
-    Options (Just category) (Just filePath) _ _ -> do
-      importVocabulary filePath category
-      putStrLn $ "Imported vocabulary from " ++ filePath ++ " to category " ++ category
-    
-    -- Import without category
-    Options Nothing (Just _) _ _ -> do
-      putStrLn "Error: --import requires --category to be specified"
-    
-    -- Study mode
-    Options (Just category) Nothing troubleWords _ -> do
-      studyCategory category troubleWords
-    
-    -- No category specified
-    Options Nothing Nothing _ _ -> do
-      putStrLn "Error: Please specify a category with --category or use --list-categories"
-      putStrLn "Use --help for more information"
+  case optCategory opts of
+    Just category ->
+      case optImport opts of
+        Just filePath -> do
+          importVocabulary filePath category
+          putStrLn $ "Imported vocabulary from " ++ filePath ++ " to category " ++ category
+        Nothing ->
+          studyCategory category (optTroubleWords opts) (optLimit opts)
+    Nothing ->
+      if optListCategories opts
+        then do
+          categories <- getCategories
+          if null categories
+            then putStrLn "No categories found. Import some vocabulary first."
+            else do
+              putStrLn "Available categories:"
+              mapM_ (putStrLn . ("  " ++)) categories
+        else
+          putStrLn "Error: Please specify a category with --category or use --list-categories"
 
 -- Import vocabulary from file
 importVocabulary :: String -> String -> IO ()
@@ -117,8 +118,8 @@ importVocabulary filePath category = do
         _ -> return () -- Skip malformed lines
 
 -- Study a category
-studyCategory :: String -> Bool -> IO ()
-studyCategory category troubleWords = do
+studyCategory :: String -> Bool -> Int -> IO ()
+studyCategory category troubleWords limit = do
   items <- if troubleWords 
            then getTroubleWords category
            else getDueItems category
@@ -128,25 +129,42 @@ studyCategory category troubleWords = do
     else do
       fsrsParams <- getFSRSParameters
       shuffledItems <- shuffleM items
-      let sortedItems = if troubleWords then sortByDifficulty shuffledItems else shuffledItems
+      let sessionItems = take limit shuffledItems
+          initialCorrectnessMap = Map.fromList $ map (\i -> (itemId i, 0)) sessionItems
+      
       putStrLn $ "Category: " ++ category
-      putStrLn $ "Items to study: " ++ show (length sortedItems)
-      runInputT defaultSettings $ traverse_ (studyItem fsrsParams) sortedItems
+      putStrLn $ "Items in this session: " ++ show (length sessionItems)
+      
+      runInputT defaultSettings $ studyLoop fsrsParams sessionItems initialCorrectnessMap
 
--- Study a single item
-studyItem :: FSRSParameters -> StringItem -> Repl ()
-studyItem fsrsParams item = do
+-- The main study loop
+studyLoop :: FSRSParameters -> [StringItem] -> Map.Map (Maybe Int) Int -> Repl ()
+studyLoop _ [] _ = do
+  outputStrLn "Session complete! Well done."
+studyLoop fsrsParams (item:restOfQueue) correctnessMap = do
   rating <- getRatingFromUser item
-  liftIO $ do
-    -- Update item with FSRS
-    updatedItem <- reviewItemFSRS fsrsParams item rating
-    -- Save to database
-    updateItemAfterReview updatedItem
-    -- Log the review
-    logReview updatedItem rating
-    -- Say the answer
-    sayText (answer item)
-  return ()
+  updatedItem <- liftIO $ reviewItemFSRS fsrsParams item rating
+
+  -- Always update the database after every single review
+  liftIO $ updateItemAfterReview updatedItem
+  liftIO $ logReview updatedItem rating
+
+  let currentCorrectCount = fromMaybe 0 (Map.lookup (itemId updatedItem) correctnessMap)
+      isCorrect = rating == Good || rating == Easy
+
+  if isCorrect then do
+    let newCorrectCount = currentCorrectCount + 1
+    if newCorrectCount >= 2 then do
+      -- Mastered for the session, remove from queue
+      outputStrLn "Mastered for this session!"
+      studyLoop fsrsParams restOfQueue (Map.insert (itemId updatedItem) newCorrectCount correctnessMap)
+    else do
+      -- Needs more correct answers, move to back of the queue
+      studyLoop fsrsParams (restOfQueue ++ [updatedItem]) (Map.insert (itemId updatedItem) newCorrectCount correctnessMap)
+  else do -- Incorrect (Again or Hard)
+    -- Reset correct count and move to back of the queue
+    studyLoop fsrsParams (restOfQueue ++ [updatedItem]) (Map.insert (itemId updatedItem) 0 correctnessMap)
+
 
 -- Get rating from user based on Levenshtein distance
 getRatingFromUser :: StringItem -> Repl FSRSRating
@@ -162,14 +180,11 @@ getRatingFromUser item = do
       
       if distance == 0
         then do
-          outputStrLn "Correct!"
           return Easy
         else if distance <= 2 -- Allow for small typos
           then do
-            outputStrLn $ "Typo? Correct answer: " ++ answer item
             return Good
           else do
-            outputStrLn $ "Incorrect. Correct answer: " ++ answer item
             return Hard
 
 
