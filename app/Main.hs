@@ -16,7 +16,8 @@ import System.Environment (getEnv)
 import System.Process (spawnCommand)
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
-import TurboM.Types (Item(..), ItemsCollection(..), InputValidator(..), FSRSRating(..), question, answer)
+import Text.EditDistance (levenshteinDistance, defaultEditCosts)
+import TurboM.Types (Item(..), FSRSRating(..), question, answer, stripSpacesToLowerCase)
 import TurboM.Database
 import TurboM.FSRS
 import System.Random.Shuffle (shuffleM)
@@ -28,8 +29,6 @@ type Repl a = InputT IO a
 
 -- Type alias for the specific instance where question and answer are Strings
 type StringItem = Item String String
--- Should be a list of items
-type StringItemsCollection = ItemsCollection String String
 
 -- Command line options
 data Options = Options
@@ -113,8 +112,8 @@ importVocabulary filePath category = do
       let parts = splitOn "##" line
       case parts of
         [answerPart, questionPart] -> do
-          let item = createNewItem questionPart answerPart
-          insertItem cat item
+          let item = createNewItem questionPart answerPart cat
+          insertItem item
         _ -> return () -- Skip malformed lines
 
 -- Study a category
@@ -127,34 +126,53 @@ studyCategory category troubleWords = do
   if null items
     then putStrLn $ "No items to study in category " ++ category
     else do
+      fsrsParams <- getFSRSParameters
       shuffledItems <- shuffleM items
       let sortedItems = if troubleWords then sortByDifficulty shuffledItems else shuffledItems
       putStrLn $ "Category: " ++ category
       putStrLn $ "Items to study: " ++ show (length sortedItems)
-      runInputT defaultSettings $ traverse_ (studyItem category) sortedItems
+      runInputT defaultSettings $ traverse_ (studyItem fsrsParams) sortedItems
 
 -- Study a single item
-studyItem :: String -> StringItem -> Repl ()
-studyItem category item = do
-  result <- readAndCheck item
-  let rating = if result then Easy else Hard
+studyItem :: FSRSParameters -> StringItem -> Repl ()
+studyItem fsrsParams item = do
+  rating <- getRatingFromUser item
   liftIO $ do
     -- Update item with FSRS
-    updatedItem <- reviewItemFSRS defaultFSRSParameters item rating
+    updatedItem <- reviewItemFSRS fsrsParams item rating
     -- Save to database
-    updateItemAfterReview category updatedItem
+    updateItemAfterReview updatedItem
     -- Log the review
-    logReview category updatedItem rating
+    logReview updatedItem rating
     -- Say the answer
     sayText (answer item)
   return ()
 
--- Legacy function kept for compatibility
-readAndCheckWithSpeech :: StringItem -> Repl Bool
-readAndCheckWithSpeech item = do
-  result <- readAndCheck item
-  liftIO $ sayText (answer item)
-  return result
+-- Get rating from user based on Levenshtein distance
+getRatingFromUser :: StringItem -> Repl FSRSRating
+getRatingFromUser item = do
+  minput <- getInputLine $ question item ++ "~ "
+  case minput of
+    Nothing -> return Again -- User wants to skip
+    Just "" -> return Again -- Empty input is 'Again'
+    Just input -> do
+      let normalizedInput = stripSpacesToLowerCase input
+          normalizedAnswer = stripSpacesToLowerCase (answer item)
+          distance = levenshteinDistance defaultEditCosts normalizedInput normalizedAnswer
+      
+      if distance == 0
+        then do
+          outputStrLn "Correct!"
+          return Easy
+        else if distance <= 2 -- Allow for small typos
+          then do
+            outputStrLn $ "Typo? Correct answer: " ++ answer item
+            return Good
+          else do
+            outputStrLn $ "Incorrect. Correct answer: " ++ answer item
+            return Hard
+
+
 
 leftPad :: Int -> String -> String
 leftPad n s = replicate n ' ' ++ s
@@ -172,32 +190,5 @@ sayText text = do
     then "afplay " ++ "\"" ++ wavFile ++ "\""
     else "say -v Anna " ++ "\"" ++ text ++ "\""
 
-readAndCheck :: StringItem -> Repl Bool
-readAndCheck item = do
-  minput <- getInputLine $ question item ++ "~ "
-  case minput of
-    Nothing -> return False
-    Just input ->
-      let result = validateInput input $ answer item
-       in do
-            if not result
-              then printError (length (question item) + 2) (answer item) input
-              else return ()
-            return result
 
--- Legacy functions kept for compatibility
-shuffleLearningItems :: StringItemsCollection -> IO StringItemsCollection
-shuffleLearningItems itemsCollection = do
-  shuffledItems <- shuffleM $ items itemsCollection
-  return $ ItemsCollection (collectionName itemsCollection) shuffledItems
 
-readItemsFromFile :: String -> String -> IO StringItemsCollection
-readItemsFromFile filePath separator = do
-  fileContents <- readFile filePath
-  let itms = map parseLine $ lines fileContents
-  return $ ItemsCollection "DICT TOOD" itms
-  where
-    parseLine :: String -> StringItem
-    parseLine line = createNewItem (last parts) (head parts)
-      where
-        parts = splitOn separator line

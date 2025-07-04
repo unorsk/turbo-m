@@ -18,9 +18,11 @@ library
     TurboM.Types
 
   build-depends:
+    , aeson
     , base           ^>=4.21.0.0
     , bytestring
     , directory
+    , edit-distance
     , filepath
     , process
     , sqlite-simple
@@ -35,6 +37,7 @@ executable turbo-m
   build-depends:
     , base                  ^>=4.21.0.0
     , directory
+    , edit-distance
     , filepath
     , haskeline
     , optparse-applicative
