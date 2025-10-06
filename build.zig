@@ -89,6 +89,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Add vaxis to both the exe and the library module
+    mod.addImport("vaxis", vaxis.module("vaxis"));
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
 
     // install exe below
