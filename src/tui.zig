@@ -163,15 +163,11 @@ pub fn run(alloc: std.mem.Allocator, items: []const types.Item) !types.Result {
         .errors_count = 0,
         .text_field = vxfw.TextField.init(alloc, &app.vx.unicode),
         .ok = .{
-            .label = "Ok",
+            .label = "Easy",
             .onClick = Model.onClick,
             .userdata = model,
         },
-        .cancel = .{
-            .label = "Don't remember",
-            .onClick = Model.onClick,
-            .userdata = model,
-        },
+        .cancel = .{ .label = "Hard", .onClick = Model.onClick, .userdata = model, .style = .{ .default = .{ .bg = .{ .rgb = .{ 255, 0, 0 } } } } },
     };
     defer model.text_field.deinit();
 
