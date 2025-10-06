@@ -2,13 +2,11 @@
 const std = @import("std");
 
 const vaxis = @import("vaxis");
-const Cell = vaxis.Cell;
-const TextInput = vaxis.widgets.TextInput;
-const border = vaxis.widgets.border;
+const vxfw = vaxis.vxfw;
 
 const log = std.log.scoped(.train_loop);
 
-const Item = struct {
+pub const Item = struct {
     front: []const u8,
     back: []const u8,
 };
@@ -29,138 +27,149 @@ pub const Result = struct {
     errors_count: u8,
 };
 
-// Our Event. This can contain internal events as well as Vaxis events.
-// Internal events can be posted into the same queue as vaxis events to allow
-// for a single event loop with exhaustive switching. Booya
-const Event = union(enum) {
-    key_press: vaxis.Key,
-    mouse: vaxis.Mouse,
-    winsize: vaxis.Winsize,
-    focus_in,
-    focus_out,
-    foo: u8,
-};
+/// Our main application model
+const Model = struct {
+    items: []const Item,
+    current_index: usize = 0,
+    errors_count: u8 = 0,
+    text_field: vxfw.TextField,
 
-pub fn train_loop(alloc: std.mem.Allocator) !Result {
-    // Initalize a tty
-    var buffer: [1024]u8 = undefined;
-    var tty = try vaxis.Tty.init(&buffer);
-    defer tty.deinit();
-
-    // Use a buffered writer for better performance. There are a lot of writes
-    // in the render loop and this can have a significant savings
-    const writer = tty.writer();
-
-    // Initialize Vaxis
-    var vx = try vaxis.init(alloc, .{
-        .kitty_keyboard_flags = .{ .report_events = true },
-    });
-    defer vx.deinit(alloc, tty.writer());
-
-    var loop: vaxis.Loop(Event) = .{
-        .vaxis = &vx,
-        .tty = &tty,
-    };
-    try loop.init();
-
-    // Start the read loop. This puts the terminal in raw mode and begins
-    // reading user input
-    try loop.start();
-    defer loop.stop();
-
-    // Optionally enter the alternate screen
-    try vx.enterAltScreen(writer);
-
-    // init our text input widget. The text input widget needs an allocator to
-    // store the contents of the input
-    var text_input = TextInput.init(alloc, &vx.unicode);
-    defer text_input.deinit();
-
-    try vx.setMouseMode(writer, true);
-
-    try writer.flush();
-    // Sends queries to terminal to detect certain features. This should
-    // _always_ be called, but is left to the application to decide when
-    try vx.queryTerminal(tty.writer(), 1 * std.time.ns_per_s);
-
-    // The main event loop. Vaxis provides a thread safe, blocking, buffered
-    // queue which can serve as the primary event queue for an application
-    while (true) {
-        // nextEvent blocks until an event is in the queue
-        const event = loop.nextEvent();
-        // log.debug("event: {}", .{event});
-        // exhaustive switching ftw. Vaxis will send events if your Event
-        // enum has the fields for those events (ie "key_press", "winsize")
-        switch (event) {
-            .key_press => |key| {
-                if (key.matches('c', .{ .ctrl = true })) {
-                    break;
-                } else if (key.matches('l', .{ .ctrl = true })) {
-                    vx.queueRefresh();
-                } else if (key.matches('n', .{ .ctrl = true })) {
-                    try vx.notify(tty.writer(), "vaxis", "hello from vaxis");
-                    loop.stop();
-                    var child = std.process.Child.init(&.{"vim"}, alloc);
-                    _ = try child.spawnAndWait();
-                    try loop.start();
-                    try vx.enterAltScreen(tty.writer());
-                    vx.queueRefresh();
-                } else if (key.matches(vaxis.Key.enter, .{}) or key.matches('j', .{ .ctrl = true })) {
-                    text_input.clearAndFree();
-                } else {
-                    try text_input.update(.{ .key_press = key });
-                }
-            },
-
-            // winsize events are sent to the application to ensure that all
-            // resizes occur in the main thread. This lets us avoid expensive
-            // locks on the screen. All applications must handle this event
-            // unless they aren't using a screen (IE only detecting features)
-            //
-            // This is the only call that the core of Vaxis needs an allocator
-            // for. The allocations are because we keep a copy of each cell to
-            // optimize renders. When resize is called, we allocated two slices:
-            // one for the screen, and one for our buffered screen. Each cell in
-            // the buffered screen contains an ArrayList(u8) to be able to store
-            // the grapheme for that cell Each cell is initialized with a size
-            // of 1, which is sufficient for all of ASCII. Anything requiring
-            // more than one byte will incur an allocation on the first render
-            // after it is drawn. Thereafter, it will not allocate unless the
-            // screen is resized
-            .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
-            else => {},
-        }
-
-        // vx.window() returns the root window. This window is the size of the
-        // terminal and can spawn child windows as logical areas. Child windows
-        // cannot draw outside of their bounds
-        const win = vx.window();
-
-        // Clear the entire space because we are drawing in immediate mode.
-        // vaxis double buffers the screen. This new frame will be compared to
-        // the old and only updated cells will be drawn
-        win.clear();
-
-        // draw the text_input using a bordered window
-        // const style: vaxis.Style = .{
-        //     // .fg = .{ .index = color_idx },
-        // };
-        const child = win.child(.{
-            .x_off = win.width / 2 - 20,
-            .y_off = win.height / 2 - 3,
-            .width = 40,
-            .height = 3,
-            .border = .{
-                .where = .bottom,
-                // .style = style,
-            },
-        });
-        text_input.draw(child);
-
-        // Render the screen
-        try vx.render(writer);
-        try writer.flush();
+    /// Helper function to return a vxfw.Widget struct
+    pub fn widget(self: *Model) vxfw.Widget {
+        return .{
+            .userdata = self,
+            .eventHandler = Model.typeErasedEventHandler,
+            .drawFn = Model.typeErasedDrawFn,
+        };
     }
 
-    return Result{ .errors_count = 0 };
+    fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
+        const self: *Model = @ptrCast(@alignCast(ptr));
+        switch (event) {
+            .init => return ctx.requestFocus(self.text_field.widget()),
+            .key_press => |key| {
+                if (key.matches('c', .{ .ctrl = true })) {
+                    ctx.quit = true;
+                    return;
+                } else if (key.matches(vaxis.Key.enter, .{})) {
+                    // Check the answer (hardcoded to always return true)
+                    const is_correct = true;
+
+                    if (is_correct) {
+                        // Move to next item
+                        if (self.current_index < self.items.len - 1) {
+                            self.current_index += 1;
+                        } else {
+                            // All items completed - quit
+                            ctx.quit = true;
+                            return;
+                        }
+                    } else {
+                        self.errors_count += 1;
+                    }
+
+                    // Clear the text field
+                    self.text_field.buf.clearRetainingCapacity();
+                    return ctx.consumeAndRedraw();
+                }
+            },
+            .focus_in => return ctx.requestFocus(self.text_field.widget()),
+            else => {},
+        }
+    }
+
+    fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
+        const self: *Model = @ptrCast(@alignCast(ptr));
+        const max_size = ctx.max.size();
+
+        // Check if we still have items
+        if (self.current_index >= self.items.len) {
+            // Show completion message
+            const completion_text: vxfw.Text = .{ .text = "All items completed!" };
+            const text_surface = try completion_text.draw(ctx);
+
+            const text_child: vxfw.SubSurface = .{
+                .origin = .{
+                    .row = @divTrunc(max_size.height, 2),
+                    .col = @divTrunc(max_size.width, 2) - @divTrunc(text_surface.size.width, 2),
+                },
+                .surface = text_surface,
+            };
+
+            const children = try ctx.arena.alloc(vxfw.SubSurface, 1);
+            children[0] = text_child;
+
+            return .{
+                .size = max_size,
+                .widget = self.widget(),
+                .buffer = &.{},
+                .children = children,
+            };
+        }
+
+        const current_item = self.items[self.current_index];
+
+        // Create front text (question)
+        const front_text: vxfw.Text = .{ .text = current_item.front };
+        const front_surface = try front_text.draw(ctx);
+
+        // Position front text centered horizontally, offset from top
+        const front_child: vxfw.SubSurface = .{
+            .origin = .{
+                .row = @divTrunc(max_size.height, 2) - 3,
+                .col = @divTrunc(max_size.width, 2) - @divTrunc(front_surface.size.width, 2),
+            },
+            .surface = front_surface,
+        };
+
+        // Create border for text field (draws a full border around the text field)
+        const border: vxfw.Border = .{
+            .child = self.text_field.widget(),
+        };
+        const border_surface = try border.draw(ctx.withConstraints(
+            ctx.min,
+            .{ .width = 62, .height = 3 },
+        ));
+
+        const border_child: vxfw.SubSurface = .{
+            .origin = .{
+                .row = @divTrunc(max_size.height, 2) + 2,
+                .col = @divTrunc(max_size.width, 2) - 31,
+            },
+            .surface = border_surface,
+        };
+
+        const children = try ctx.arena.alloc(vxfw.SubSurface, 2);
+        children[0] = front_child;
+        children[1] = border_child;
+
+        return .{
+            .size = max_size,
+            .widget = self.widget(),
+            .buffer = &.{},
+            .children = children,
+        };
+    }
+};
+
+pub fn train_loop(alloc: std.mem.Allocator, items: []const Item) !Result {
+    var app = try vxfw.App.init(alloc);
+    defer app.deinit();
+
+    // Heap allocate our model for stable pointer
+    const model = try alloc.create(Model);
+    defer alloc.destroy(model);
+
+    // Initialize the model
+    model.* = .{
+        .items = items,
+        .current_index = 0,
+        .errors_count = 0,
+        .text_field = vxfw.TextField.init(alloc, &app.vx.unicode),
+    };
+    defer model.text_field.deinit();
+
+    try app.run(model.widget(), .{});
+
+    return Result{ .errors_count = model.errors_count };
 }

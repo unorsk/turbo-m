@@ -15,5 +15,11 @@ pub fn main() !void {
     }
     const alloc = gpa.allocator();
 
-    _ = try root.train_loop(alloc);
+    const items = [_]root.Item{
+        root.Item{ .front = "Hello", .back = "Hola" },
+        root.Item{ .front = "Bye", .back = "Adios" },
+        root.Item{ .front = "Thank you", .back = "Gracias" },
+    };
+
+    _ = try root.train_loop(alloc, &items);
 }
