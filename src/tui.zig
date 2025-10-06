@@ -10,6 +10,15 @@ const Model = struct {
     current_index: usize = 0,
     errors_count: u8 = 0,
     text_field: vxfw.TextField,
+    ok: vxfw.Button,
+    cancel: vxfw.Button,
+
+    fn onClick(_: ?*anyopaque, ctx: *vxfw.EventContext) anyerror!void {
+        // const ptr = maybe_ptr orelse return;
+        // const self: *Model = @ptrCast(@alignCast(ptr));
+        // self.count +|= 1;
+        return ctx.consumeAndRedraw();
+    }
 
     pub fn widget(self: *Model) vxfw.Widget {
         return .{
@@ -106,9 +115,31 @@ const Model = struct {
             .surface = border_surface,
         };
 
-        const children = try ctx.arena.alloc(vxfw.SubSurface, 2);
+        const ok: vxfw.SubSurface = .{
+            .origin = .{ .row = @divTrunc(max_size.height, 2) + 5, .col = @divTrunc(max_size.width, 2) + 31 - 17 },
+            .surface = try self.ok.draw(ctx.withConstraints(
+                ctx.min,
+                // Here we explicitly set a new maximum size constraint for the Button. A Button will
+                // expand to fill its area and must have some hard limit in the maximum constraint
+                .{ .width = 8, .height = 1 },
+            )),
+        };
+
+        const cancel: vxfw.SubSurface = .{
+            .origin = .{ .row = @divTrunc(max_size.height, 2) + 5, .col = @divTrunc(max_size.width, 2) + 31 - 8 },
+            .surface = try self.cancel.draw(ctx.withConstraints(
+                ctx.min,
+                // Here we explicitly set a new maximum size constraint for the Button. A Button will
+                // expand to fill its area and must have some hard limit in the maximum constraint
+                .{ .width = 8, .height = 1 },
+            )),
+        };
+
+        const children = try ctx.arena.alloc(vxfw.SubSurface, 4);
         children[0] = front_child;
         children[1] = border_child;
+        children[2] = ok;
+        children[3] = cancel;
 
         return .{
             .size = max_size,
@@ -131,6 +162,16 @@ pub fn run(alloc: std.mem.Allocator, items: []const types.Item) !types.Result {
         .current_index = 0,
         .errors_count = 0,
         .text_field = vxfw.TextField.init(alloc, &app.vx.unicode),
+        .ok = .{
+            .label = "Ok",
+            .onClick = Model.onClick,
+            .userdata = model,
+        },
+        .cancel = .{
+            .label = "Don't remember",
+            .onClick = Model.onClick,
+            .userdata = model,
+        },
     };
     defer model.text_field.deinit();
 
