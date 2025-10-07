@@ -2,6 +2,7 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 const types = @import("types.zig");
+const root = @import("root.zig");
 
 const log = std.log.scoped(.tui);
 
@@ -57,10 +58,14 @@ const Model = struct {
 
                 if (key.matches(vaxis.Key.enter, .{})) {
                     const current_item = self.items[self.current_index];
-                    const user_input = self.text_field.buf.buffer;
+                    // const user_input = self.text_field.userdata;
+                    const user_input = try self.text_field.buf.dupe();
+                    // defer alloc.free(user_input);
 
                     // Validate answer
-                    const is_correct = std.mem.eql(u8, user_input, current_item.back);
+                    // std.debug.print("{s}", .{user_input});
+                    const match_type = root.srs.checkAnswer(current_item.back, user_input);
+                    const is_correct = match_type == .exact;
 
                     if (is_correct) {
                         if (self.current_index < self.items.len - 1) {
@@ -96,16 +101,16 @@ const Model = struct {
         if (self.showing_error) {
             const current_item = self.items[self.current_index];
 
-            const error_text: vxfw.Text = .{ .text = "Incorrect!" };
-            const error_surface = try error_text.draw(ctx);
+            // const error_text: vxfw.Text = .{ .text = "Incorrect!" };
+            // const error_surface = try error_text.draw(ctx);
 
-            const error_child: vxfw.SubSurface = .{
-                .origin = .{
-                    .row = @divTrunc(max_size.height, 2) - 4,
-                    .col = @divTrunc(max_size.width, 2) - @divTrunc(error_surface.size.width, 2),
-                },
-                .surface = error_surface,
-            };
+            // const error_child: vxfw.SubSurface = .{
+            //     .origin = .{
+            //         .row = @divTrunc(max_size.height, 2) - 4,
+            //         .col = @divTrunc(max_size.width, 2) - @divTrunc(error_surface.size.width, 2),
+            //     },
+            //     .surface = error_surface,
+            // };
 
             const correct_text_str = try std.fmt.allocPrint(ctx.arena, "Correct answer: {s}", .{current_item.back});
             const correct_text: vxfw.Text = .{ .text = correct_text_str };
@@ -124,7 +129,7 @@ const Model = struct {
 
             const continue_child: vxfw.SubSurface = .{
                 .origin = .{
-                    .row = @divTrunc(max_size.height, 2) + 2,
+                    .row = @divTrunc(max_size.height, 2) + 8,
                     .col = @divTrunc(max_size.width, 2) - @divTrunc(continue_surface.size.width, 2),
                 },
                 .surface = continue_surface,
@@ -141,17 +146,17 @@ const Model = struct {
 
             const text_field_child: vxfw.SubSurface = .{
                 .origin = .{
-                    .row = @divTrunc(max_size.height, 2) + 5,
+                    .row = @divTrunc(max_size.height, 2) + 2,
                     .col = @divTrunc(max_size.width, 2) - 31,
                 },
                 .surface = border_surface,
             };
 
-            const children = try ctx.arena.alloc(vxfw.SubSurface, 4);
-            children[0] = error_child;
-            children[1] = correct_child;
-            children[2] = continue_child;
-            children[3] = text_field_child;
+            const children = try ctx.arena.alloc(vxfw.SubSurface, 3);
+            // children[0] = error_child;
+            children[0] = correct_child;
+            children[1] = continue_child;
+            children[2] = text_field_child;
 
             return .{
                 .size = max_size,
