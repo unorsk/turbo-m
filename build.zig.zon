@@ -36,6 +36,10 @@
             .url = "git+https://github.com/rockorager/libvaxis.git#9fc9015d5f147568e18c5e7ca28f15bf8b293760",
             .hash = "vaxis-0.5.1-BWNV_O8fCQAeUeVrESVc-2BdXloEXkFqReDJL7Q6XTSZ",
         },
+        .levenshtein = .{
+            .url = "git+https://github.com/andrist3/levenshtein.git#f850e2f7d51c0e2e9b10eaa5e63dbe26b7babb99",
+            .hash = "levenshtein-0.0.1-SngU0jYmAABK3eP36uPFh0Nv9VYNnURUQ9EjEj5tQsx6",
+        },
     },
     .paths = .{
         "build.zig",

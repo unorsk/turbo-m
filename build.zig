@@ -93,6 +93,16 @@ pub fn build(b: *std.Build) void {
     mod.addImport("vaxis", vaxis.module("vaxis"));
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
 
+    // add levenshtein dependency to module
+    const levenshtein = b.dependency("levenshtein", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Add levenshtein to both the exe and the library module
+    mod.addImport("levenshtein", levenshtein.module("levenshtein"));
+    exe.root_module.addImport("levenshtein", levenshtein.module("levenshtein"));
+
     // install exe below
 
     // This declares intent for the executable to be installed into the

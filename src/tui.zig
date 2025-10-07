@@ -7,6 +7,7 @@ const root = @import("root.zig");
 const log = std.log.scoped(.tui);
 
 const Model = struct {
+    alloc: std.mem.Allocator,
     items: []const types.Item,
     current_index: usize = 0,
     errors_count: u8 = 0,
@@ -14,6 +15,7 @@ const Model = struct {
     ok: vxfw.Button,
     cancel: vxfw.Button,
     showing_error: bool = false,
+    last_match_type: types.MatchType = .exact,
 
     fn onClick(_: ?*anyopaque, ctx: *vxfw.EventContext) anyerror!void {
         // const ptr = maybe_ptr orelse return;
@@ -64,10 +66,11 @@ const Model = struct {
 
                     // Validate answer
                     // std.debug.print("{s}", .{user_input});
-                    const match_type = root.srs.checkAnswer(current_item.back, user_input);
-                    const is_correct = match_type == .exact;
+                    const match_type = try root.srs.checkAnswer(self.alloc, current_item.back, user_input);
+                    self.last_match_type = match_type;
 
-                    if (is_correct) {
+                    if (match_type == .exact) {
+                        // Exact match - move to next item
                         if (self.current_index < self.items.len - 1) {
                             self.current_index += 1;
                             self.text_field.buf.clearRetainingCapacity();
@@ -76,7 +79,7 @@ const Model = struct {
                             return;
                         }
                     } else {
-                        // Show error view with correct answer
+                        // Fuzzy or incorrect - show message with correct answer
                         self.errors_count += 1;
                         self.showing_error = true;
                     }
@@ -101,16 +104,21 @@ const Model = struct {
         if (self.showing_error) {
             const current_item = self.items[self.current_index];
 
-            // const error_text: vxfw.Text = .{ .text = "Incorrect!" };
-            // const error_surface = try error_text.draw(ctx);
+            // Show different message based on match type
+            const status_text_str = if (self.last_match_type == .fuzzy)
+                "Close!"
+            else
+                "Incorrect!";
+            const status_text: vxfw.Text = .{ .text = status_text_str };
+            const status_surface = try status_text.draw(ctx);
 
-            // const error_child: vxfw.SubSurface = .{
-            //     .origin = .{
-            //         .row = @divTrunc(max_size.height, 2) - 4,
-            //         .col = @divTrunc(max_size.width, 2) - @divTrunc(error_surface.size.width, 2),
-            //     },
-            //     .surface = error_surface,
-            // };
+            const status_child: vxfw.SubSurface = .{
+                .origin = .{
+                    .row = @divTrunc(max_size.height, 2) - 4,
+                    .col = @divTrunc(max_size.width, 2) - @divTrunc(status_surface.size.width, 2),
+                },
+                .surface = status_surface,
+            };
 
             const correct_text_str = try std.fmt.allocPrint(ctx.arena, "Correct answer: {s}", .{current_item.back});
             const correct_text: vxfw.Text = .{ .text = correct_text_str };
@@ -152,11 +160,11 @@ const Model = struct {
                 .surface = border_surface,
             };
 
-            const children = try ctx.arena.alloc(vxfw.SubSurface, 3);
-            // children[0] = error_child;
-            children[0] = correct_child;
-            children[1] = continue_child;
-            children[2] = text_field_child;
+            const children = try ctx.arena.alloc(vxfw.SubSurface, 4);
+            children[0] = status_child;
+            children[1] = correct_child;
+            children[2] = continue_child;
+            children[3] = text_field_child;
 
             return .{
                 .size = max_size,
@@ -261,6 +269,7 @@ pub fn run(alloc: std.mem.Allocator, items: []const types.Item) !types.Result {
     defer alloc.destroy(model);
 
     model.* = .{
+        .alloc = alloc,
         .items = items,
         .current_index = 0,
         .errors_count = 0,
