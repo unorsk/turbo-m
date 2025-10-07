@@ -8,14 +8,14 @@ const log = std.log.scoped(.tui);
 
 const Model = struct {
     alloc: std.mem.Allocator,
-    items: []const types.Item,
-    current_index: usize = 0,
+    session: root.srs.TrainingSession,
     errors_count: u8 = 0,
     text_field: vxfw.TextField,
     ok: vxfw.Button,
     cancel: vxfw.Button,
     showing_error: bool = false,
     last_match_type: types.MatchType = .exact,
+    last_item: ?types.Item = null, // Store the item we just answered
 
     fn onClick(_: ?*anyopaque, ctx: *vxfw.EventContext) anyerror!void {
         // const ptr = maybe_ptr orelse return;
@@ -46,10 +46,8 @@ const Model = struct {
                 if (self.showing_error) {
                     self.showing_error = false;
 
-                    // Move to next item or quit
-                    if (self.current_index < self.items.len - 1) {
-                        self.current_index += 1;
-                    } else {
+                    // Check if session is completed
+                    if (self.session.isCompleted()) {
                         ctx.quit = true;
                         return;
                     }
@@ -59,22 +57,23 @@ const Model = struct {
                 }
 
                 if (key.matches(vaxis.Key.enter, .{})) {
-                    const current_item = self.items[self.current_index];
-                    // const user_input = self.text_field.userdata;
                     const user_input = try self.text_field.buf.dupe();
                     defer self.alloc.free(user_input);
 
-                    // Validate answer
-                    // std.debug.print("{s}", .{user_input});
-                    const match_type = try root.srs.checkAnswer(self.alloc, current_item.back, user_input);
+                    // Save the current item BEFORE submitting answer (since submitAnswer advances)
+                    const current_item = self.session.currentItem();
+                    self.last_item = current_item;
+
+                    // Submit answer to training session
+                    const match_type = try self.session.submitAnswer(user_input);
                     self.last_match_type = match_type;
 
                     if (match_type == .exact) {
-                        // Exact match - move to next item
-                        if (self.current_index < self.items.len - 1) {
-                            self.current_index += 1;
-                            self.text_field.buf.clearRetainingCapacity();
-                        } else {
+                        // Exact match - clear input and continue
+                        self.text_field.buf.clearRetainingCapacity();
+
+                        // Check if completed
+                        if (self.session.isCompleted()) {
                             ctx.quit = true;
                             return;
                         }
@@ -102,7 +101,30 @@ const Model = struct {
 
         // Show error view
         if (self.showing_error) {
-            const current_item = self.items[self.current_index];
+            // Use the last item we answered (saved before submitAnswer advanced)
+            const current_item = self.last_item orelse {
+                // Fallback: if no last_item, show completion message
+                const completion_text: vxfw.Text = .{ .text = "All items completed!" };
+                const text_surface = try completion_text.draw(ctx);
+
+                const text_child: vxfw.SubSurface = .{
+                    .origin = .{
+                        .row = @divTrunc(max_size.height, 2),
+                        .col = @divTrunc(max_size.width, 2) - @divTrunc(text_surface.size.width, 2),
+                    },
+                    .surface = text_surface,
+                };
+
+                const children = try ctx.arena.alloc(vxfw.SubSurface, 1);
+                children[0] = text_child;
+
+                return .{
+                    .size = max_size,
+                    .widget = self.widget(),
+                    .buffer = &.{},
+                    .children = children,
+                };
+            };
 
             // Show different message based on match type
             const status_text_str = if (self.last_match_type == .fuzzy)
@@ -174,7 +196,8 @@ const Model = struct {
             };
         }
 
-        if (self.current_index >= self.items.len) {
+        const current_item = self.session.currentItem() orelse {
+            // If no current item, show completion message
             const completion_text: vxfw.Text = .{ .text = "All items completed!" };
             const text_surface = try completion_text.draw(ctx);
 
@@ -195,9 +218,7 @@ const Model = struct {
                 .buffer = &.{},
                 .children = children,
             };
-        }
-
-        const current_item = self.items[self.current_index];
+        };
 
         const front_text: vxfw.Text = .{ .text = current_item.front };
         const front_surface = try front_text.draw(ctx);
@@ -265,13 +286,16 @@ pub fn run(alloc: std.mem.Allocator, items: []const types.Item) !types.Result {
     var app = try vxfw.App.init(alloc);
     defer app.deinit();
 
+    // Initialize training session
+    var session = try root.srs.TrainingSession.init(alloc, items);
+    defer session.deinit();
+
     const model = try alloc.create(Model);
     defer alloc.destroy(model);
 
     model.* = .{
         .alloc = alloc,
-        .items = items,
-        .current_index = 0,
+        .session = session,
         .errors_count = 0,
         .text_field = vxfw.TextField.init(alloc, &app.vx.unicode),
         .ok = .{
@@ -287,7 +311,7 @@ pub fn run(alloc: std.mem.Allocator, items: []const types.Item) !types.Result {
 
     return types.Result{
         .errors_count = model.errors_count,
-        .items_completed = model.current_index + 1,
-        .total_items = items.len,
+        .items_completed = session.completedItems(),
+        .total_items = session.totalItems(),
     };
 }

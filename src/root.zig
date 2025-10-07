@@ -71,6 +71,170 @@ pub const srs = struct {
         _ = correct_count;
         return 1;
     }
+
+    /// Shuffle an array of items in place using Fisher-Yates algorithm
+    pub fn shuffle(comptime T: type, items: []T, seed: u64) void {
+        var prng = std.Random.DefaultPrng.init(seed);
+        const rand = prng.random();
+        rand.shuffle(T, items);
+    }
+
+    /// Training session that manages the state of a spaced repetition training
+    pub const TrainingSession = struct {
+        allocator: std.mem.Allocator,
+        tracked_items: []TrackedItem,
+        current_index: usize,
+        completed_count: usize,
+
+        /// Initialize a training session from items
+        /// Items will be shuffled and each item needs to be answered correctly twice
+        pub fn init(allocator: std.mem.Allocator, items: []const Item) !TrainingSession {
+            const tracked_items = try allocator.alloc(TrackedItem, items.len);
+
+            for (items, 0..) |item, i| {
+                tracked_items[i] = TrackedItem{
+                    .item = item,
+                    .correct_count = 0,
+                    .completed = false,
+                };
+            }
+
+            // Shuffle the items
+            const seed = @as(u64, @intCast(std.time.nanoTimestamp()));
+            shuffle(TrackedItem, tracked_items, seed);
+
+            return TrainingSession{
+                .allocator = allocator,
+                .tracked_items = tracked_items,
+                .current_index = 0,
+                .completed_count = 0,
+            };
+        }
+
+        pub fn deinit(self: *TrainingSession) void {
+            self.allocator.free(self.tracked_items);
+        }
+
+        /// Get the current item to train
+        /// Returns null if all items are completed
+        pub fn currentItem(self: *TrainingSession) ?Item {
+            if (self.isCompleted()) return null;
+            return self.tracked_items[self.current_index].item;
+        }
+
+        /// Submit an answer for the current item
+        /// Returns the match type and automatically advances to next item or reshuffles
+        pub fn submitAnswer(self: *TrainingSession, answer: []const u8) !MatchType {
+            if (self.isCompleted()) return error.SessionCompleted;
+
+            const tracked_item = &self.tracked_items[self.current_index];
+            const match_type = try checkAnswer(self.allocator, tracked_item.item.back, answer);
+
+            // Update tracking based on match type
+            switch (match_type) {
+                .exact, .fuzzy => {
+                    tracked_item.correct_count += 1;
+                    if (tracked_item.correct_count >= 2) {
+                        tracked_item.completed = true;
+                        self.completed_count += 1;
+                    }
+                },
+                .incorrect => {
+                    // Don't increment correct count on incorrect answers
+                },
+            }
+
+            // Move to next item
+            self.advance();
+
+            return match_type;
+        }
+
+        /// Advance to the next incomplete item, reshuffling if necessary
+        fn advance(self: *TrainingSession) void {
+            // Find next incomplete item
+            var found = false;
+            const start_index = self.current_index + 1;
+
+            // Search from current position to end
+            for (start_index..self.tracked_items.len) |i| {
+                if (!self.tracked_items[i].completed) {
+                    self.current_index = i;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                // Need to reshuffle and start new round
+                self.reshuffleIncomplete();
+            }
+        }
+
+        /// Reshuffle incomplete items and start a new round
+        fn reshuffleIncomplete(self: *TrainingSession) void {
+            // Count incomplete items
+            var incomplete_count: usize = 0;
+            for (self.tracked_items) |tracked_item| {
+                if (!tracked_item.completed) {
+                    incomplete_count += 1;
+                }
+            }
+
+            if (incomplete_count == 0) {
+                return;
+            }
+
+            // Collect incomplete items
+            var incomplete_items = self.allocator.alloc(TrackedItem, incomplete_count) catch return;
+            defer self.allocator.free(incomplete_items);
+
+            var idx: usize = 0;
+            for (self.tracked_items) |tracked_item| {
+                if (!tracked_item.completed) {
+                    incomplete_items[idx] = tracked_item;
+                    idx += 1;
+                }
+            }
+
+            // Shuffle incomplete items
+            const seed = @as(u64, @intCast(std.time.nanoTimestamp()));
+            shuffle(TrackedItem, incomplete_items, seed);
+
+            // Place shuffled incomplete items at the beginning
+            var write_idx: usize = 0;
+            for (incomplete_items) |item| {
+                self.tracked_items[write_idx] = item;
+                write_idx += 1;
+            }
+
+            // Place completed items after
+            for (self.tracked_items) |tracked_item| {
+                if (tracked_item.completed) {
+                    self.tracked_items[write_idx] = tracked_item;
+                    write_idx += 1;
+                }
+            }
+
+            // Reset to beginning
+            self.current_index = 0;
+        }
+
+        /// Check if the training session is completed
+        pub fn isCompleted(self: *TrainingSession) bool {
+            return self.completed_count >= self.tracked_items.len;
+        }
+
+        /// Get total number of items
+        pub fn totalItems(self: *TrainingSession) usize {
+            return self.tracked_items.len;
+        }
+
+        /// Get number of completed items
+        pub fn completedItems(self: *TrainingSession) usize {
+            return self.completed_count;
+        }
+    };
 };
 
 test "basic functionality" {
