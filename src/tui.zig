@@ -62,7 +62,7 @@ const Model = struct {
                     const current_item = self.items[self.current_index];
                     // const user_input = self.text_field.userdata;
                     const user_input = try self.text_field.buf.dupe();
-                    // defer alloc.free(user_input);
+                    defer self.alloc.free(user_input);
 
                     // Validate answer
                     // std.debug.print("{s}", .{user_input});

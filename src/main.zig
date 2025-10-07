@@ -99,32 +99,24 @@ pub fn main() !void {
             return;
         },
         .tui => {
-            const items = if (parsed_args.file_path) |file_path| blk: {
-                const loaded_items = try loadItemsFromFile(alloc, file_path);
-                break :blk loaded_items;
-            } else blk: {
-                // Fallback to sample items for testing
-                const sample_items = try alloc.alloc(turbo_m.Item, 5);
-                sample_items[0] = .{ .front = "Hello", .back = "Hola" };
-                sample_items[1] = .{ .front = "Bye", .back = "Adios" };
-                sample_items[2] = .{ .front = "Thank you", .back = "Gracias" };
-                sample_items[3] = .{ .front = "Good morning", .back = "Buenos días" };
-                sample_items[4] = .{ .front = "Good night", .back = "Buenas noches" };
-                break :blk sample_items;
-            };
-            // defer {
-            //     for (items) |item| {
-            //         alloc.free(item.front);
-            //         alloc.free(item.back);
-            //     }
-            //     alloc.free(items);
-            // }
+            if (parsed_args.file_path) |file_path| {
+                const items = try loadItemsFromFile(alloc, file_path);
+                defer {
+                    for (items) |item| {
+                        alloc.free(item.front);
+                        alloc.free(item.back);
+                    }
+                    alloc.free(items);
+                }
+                const result = try turbo_m.tui.run(alloc, items);
 
-            const result = try turbo_m.tui.run(alloc, items);
-
-            log.info("Training session completed:", .{});
-            log.info("  Items completed: {}/{}", .{ result.items_completed, result.total_items });
-            log.info("  Errors: {}", .{result.errors_count});
+                log.info("Training session completed:", .{});
+                log.info("  Items completed: {}/{}", .{ result.items_completed, result.total_items });
+                log.info("  Errors: {}", .{result.errors_count});
+            } else {
+                log.err("Expected a path to a deck: turbo-m tui <file>", .{});
+                return;
+            }
         },
         .cli => {
             std.debug.print("CLI mode not yet implemented. Use 'turbo_m tui <file>' or 'turbo_m help'\n", .{});
