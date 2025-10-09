@@ -126,29 +126,14 @@ const Model = struct {
                 };
             };
 
-            // Show different message based on match type
-            const status_text_str = if (self.last_match_type == .fuzzy)
-                "Close!"
-            else
-                "Incorrect!";
-            const status_text: vxfw.Text = .{ .text = status_text_str };
-            const status_surface = try status_text.draw(ctx);
-
-            const status_child: vxfw.SubSurface = .{
-                .origin = .{
-                    .row = @divTrunc(max_size.height, 2) - 4,
-                    .col = @divTrunc(max_size.width, 2) - @divTrunc(status_surface.size.width, 2),
-                },
-                .surface = status_surface,
-            };
-
-            const correct_text_str = try std.fmt.allocPrint(ctx.arena, "Correct answer: {s}", .{current_item.back});
+            const status_text_str = if (self.last_match_type == .fuzzy) "≈" else "⚠️";
+            const correct_text_str = try std.fmt.allocPrint(ctx.arena, "{s} Correct answer: {s}", .{ status_text_str, current_item.back });
             const correct_text: vxfw.Text = .{ .text = correct_text_str };
             const correct_surface = try correct_text.draw(ctx);
 
             const correct_child: vxfw.SubSurface = .{
                 .origin = .{
-                    .row = @divTrunc(max_size.height, 2) - 2,
+                    .row = @divTrunc(max_size.height, 2) - 3,
                     .col = @divTrunc(max_size.width, 2) - @divTrunc(correct_surface.size.width, 2),
                 },
                 .surface = correct_surface,
@@ -182,11 +167,11 @@ const Model = struct {
                 .surface = border_surface,
             };
 
-            const children = try ctx.arena.alloc(vxfw.SubSurface, 4);
-            children[0] = status_child;
-            children[1] = correct_child;
-            children[2] = continue_child;
-            children[3] = text_field_child;
+            const children = try ctx.arena.alloc(vxfw.SubSurface, 3);
+            // children[0] = status_child;
+            children[0] = correct_child;
+            children[1] = continue_child;
+            children[2] = text_field_child;
 
             return .{
                 .size = max_size,
