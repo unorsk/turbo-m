@@ -10,6 +10,9 @@ pub const TrackedItem = types.TrackedItem;
 pub const Result = types.Result;
 pub const MatcherConfig = types.MatcherConfig;
 
+pub const session_controller = @import("session_controller.zig");
+pub const SessionController = session_controller.SessionController;
+
 pub const tui = @import("tui.zig");
 
 /// Answer matching abstraction that encapsulates matching logic and configuration
