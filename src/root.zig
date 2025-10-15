@@ -8,46 +8,42 @@ pub const Item = types.Item;
 pub const MatchType = types.MatchType;
 pub const TrackedItem = types.TrackedItem;
 pub const Result = types.Result;
+pub const MatcherConfig = types.MatcherConfig;
 
 pub const tui = @import("tui.zig");
 
-fn normalizeString(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-    var normalized = try allocator.alloc(u8, input.len);
-    var write_idx: usize = 0;
+/// Answer matching abstraction that encapsulates matching logic and configuration
+/// This allows for configurable matching behavior and easy testing
+pub const Matcher = struct {
+    config: MatcherConfig,
+    allocator: std.mem.Allocator,
 
-    for (input) |char| {
-        if (std.ascii.isAlphabetic(char)) {
-            normalized[write_idx] = std.ascii.toLower(char);
-            write_idx += 1;
-        } else if (std.ascii.isWhitespace(char)) {
-            // Keep spaces but normalize them
-            if (write_idx > 0 and normalized[write_idx - 1] != ' ') {
-                normalized[write_idx] = ' ';
-                write_idx += 1;
-            }
-        }
+    /// Create a new Matcher with the given configuration
+    pub fn init(allocator: std.mem.Allocator, config: MatcherConfig) Matcher {
+        return Matcher{
+            .allocator = allocator,
+            .config = config,
+        };
     }
 
-    // Trim trailing space if any
-    if (write_idx > 0 and normalized[write_idx - 1] == ' ') {
-        write_idx -= 1;
+    /// Create a new Matcher with default configuration
+    pub fn initDefault(allocator: std.mem.Allocator) Matcher {
+        return init(allocator, MatcherConfig.default());
     }
 
-    return allocator.realloc(normalized, write_idx);
-}
-
-pub const srs = struct {
-    pub fn checkAnswer(allocator: std.mem.Allocator, expected: []const u8, actual: []const u8) !MatchType {
-        // Exact match
+    /// Match an expected answer against an actual answer
+    /// Returns the match type (exact, fuzzy, or incorrect)
+    pub fn match(self: *const Matcher, expected: []const u8, actual: []const u8) !MatchType {
+        // Exact match before any processing
         if (std.mem.eql(u8, expected, actual)) {
             return .exact;
         }
 
         // Normalize strings for comparison
-        const normalized_expected = try normalizeString(allocator, expected);
-        defer allocator.free(normalized_expected);
-        const normalized_actual = try normalizeString(allocator, actual);
-        defer allocator.free(normalized_actual);
+        const normalized_expected = try self.normalizeString(expected);
+        defer self.allocator.free(normalized_expected);
+        const normalized_actual = try self.normalizeString(actual);
+        defer self.allocator.free(normalized_actual);
 
         // Check for exact match after normalization
         if (std.mem.eql(u8, normalized_expected, normalized_actual)) {
@@ -55,16 +51,60 @@ pub const srs = struct {
         }
 
         // Calculate Levenshtein distance
-        const distance = try levenshtein_lib.levenshtein(allocator, normalized_actual, normalized_expected, null);
+        const distance = try levenshtein_lib.levenshtein(
+            self.allocator,
+            normalized_actual,
+            normalized_expected,
+            null,
+        );
 
-        // Apply distance thresholds based on length
-        const threshold = if (normalized_expected.len > 3) @as(usize, 2) else @as(usize, 1);
+        // Apply distance thresholds based on configured length boundary
+        const threshold = if (normalized_expected.len > self.config.length_boundary)
+            self.config.threshold_long
+        else
+            self.config.threshold_short;
 
         if (distance <= threshold) {
             return .fuzzy;
         }
 
         return .incorrect;
+    }
+
+    /// Normalize a string by converting to lowercase and removing/normalizing whitespace
+    /// Returns a newly allocated string that the caller must free
+    fn normalizeString(self: *const Matcher, input: []const u8) ![]u8 {
+        var normalized = try self.allocator.alloc(u8, input.len);
+        var write_idx: usize = 0;
+
+        for (input) |char| {
+            if (std.ascii.isAlphabetic(char)) {
+                normalized[write_idx] = std.ascii.toLower(char);
+                write_idx += 1;
+            } else if (std.ascii.isWhitespace(char)) {
+                // Keep spaces but normalize them
+                if (write_idx > 0 and normalized[write_idx - 1] != ' ') {
+                    normalized[write_idx] = ' ';
+                    write_idx += 1;
+                }
+            }
+        }
+
+        // Trim trailing space if any
+        if (write_idx > 0 and normalized[write_idx - 1] == ' ') {
+            write_idx -= 1;
+        }
+
+        return self.allocator.realloc(normalized, write_idx);
+    }
+};
+
+pub const srs = struct {
+    /// Convenience function for checking answers with default configuration
+    /// For more control, create a Matcher instance directly
+    pub fn checkAnswer(allocator: std.mem.Allocator, expected: []const u8, actual: []const u8) !MatchType {
+        const matcher = Matcher.initDefault(allocator);
+        return matcher.match(expected, actual);
     }
 
     pub fn calculateNextInterval(correct_count: u8) u32 {
@@ -85,10 +125,11 @@ pub const srs = struct {
         tracked_items: []TrackedItem,
         current_index: usize,
         completed_count: usize,
+        matcher: Matcher,
 
-        /// Initialize a training session from items
+        /// Initialize a training session from items with custom matcher configuration
         /// Items will be shuffled and each item needs to be answered correctly twice
-        pub fn init(allocator: std.mem.Allocator, items: []const Item) !TrainingSession {
+        pub fn initWithMatcher(allocator: std.mem.Allocator, items: []const Item, matcher: Matcher) !TrainingSession {
             const tracked_items = try allocator.alloc(TrackedItem, items.len);
 
             for (items, 0..) |item, i| {
@@ -108,7 +149,15 @@ pub const srs = struct {
                 .tracked_items = tracked_items,
                 .current_index = 0,
                 .completed_count = 0,
+                .matcher = matcher,
             };
+        }
+
+        /// Initialize a training session from items with default matcher configuration
+        /// Items will be shuffled and each item needs to be answered correctly twice
+        pub fn init(allocator: std.mem.Allocator, items: []const Item) !TrainingSession {
+            const matcher = Matcher.initDefault(allocator);
+            return initWithMatcher(allocator, items, matcher);
         }
 
         pub fn deinit(self: *TrainingSession) void {
@@ -128,7 +177,7 @@ pub const srs = struct {
             if (self.isCompleted()) return error.SessionCompleted;
 
             const tracked_item = &self.tracked_items[self.current_index];
-            const match_type = try checkAnswer(self.allocator, tracked_item.item.back, answer);
+            const match_type = try self.matcher.match(tracked_item.item.back, answer);
 
             // Update tracking based on match type
             switch (match_type) {
@@ -237,7 +286,7 @@ pub const srs = struct {
     };
 };
 
-test "basic functionality" {
+test "basic functionality - convenience function" {
     const testing = std.testing;
 
     try testing.expectEqual(MatchType.exact, try srs.checkAnswer(testing.allocator, "hello", "hello"));
@@ -246,7 +295,166 @@ test "basic functionality" {
 
     // Test fuzzy matching
     try testing.expectEqual(MatchType.fuzzy, try srs.checkAnswer(testing.allocator, "hello", "helo"));
-    try testing.expectEqual(MatchType.fuzzy, try srs.checkAnswer(testing.allocator, "hello", "Hello"));
+    try testing.expectEqual(MatchType.exact, try srs.checkAnswer(testing.allocator, "hello", "Hello")); // Case normalized to exact
     try testing.expectEqual(MatchType.fuzzy, try srs.checkAnswer(testing.allocator, "test", "tst"));
     try testing.expectEqual(MatchType.fuzzy, try srs.checkAnswer(testing.allocator, "cat", "ca"));
+}
+
+test "Matcher - default configuration" {
+    const testing = std.testing;
+    const matcher = Matcher.initDefault(testing.allocator);
+
+    // Exact matches
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello", "hello"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("test", "test"));
+
+    // Case-insensitive exact matches
+    try testing.expectEqual(MatchType.exact, try matcher.match("Hello", "hello"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("HELLO", "hello"));
+
+    // Whitespace normalization
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello  world", "hello world"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello\tworld", "hello world"));
+
+    // Short strings (length <= 3): threshold = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("cat", "ca"));
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("dog", "do"));
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("cat", "c")); // distance = 2
+
+    // Long strings (length > 3): threshold = 2
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("hello", "helo")); // distance = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("hello", "hllo")); // distance = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("testing", "tesing")); // distance = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("hello", "helo")); // distance = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("hello", "heo")); // distance = 2 (at boundary, still fuzzy)
+
+    // Completely different strings
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("hello", "world"));
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("cat", "dog"));
+}
+
+test "Matcher - strict configuration" {
+    const testing = std.testing;
+    const config = MatcherConfig.strict();
+    const matcher = Matcher.init(testing.allocator, config);
+
+    // Exact matches still work
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello", "hello"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("Hello", "hello"));
+
+    // Short strings (length <= 5): threshold = 0 (only exact matches)
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("cat", "ca"));
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("hello", "helo"));
+
+    // Long strings (length > 5): threshold = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("testing", "tesing")); // distance = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("testing", "tsting")); // distance = 1 (one insertion)
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("testing", "testng")); // distance = 1 (one deletion)
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("testing", "tting")); // distance = 2 (two deletions)
+}
+
+test "Matcher - lenient configuration" {
+    const testing = std.testing;
+    const config = MatcherConfig.lenient();
+    const matcher = Matcher.init(testing.allocator, config);
+
+    // Exact matches still work
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello", "hello"));
+
+    // Short strings (length <= 3): threshold = 2
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("cat", "ca")); // distance = 1
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("cat", "c")); // distance = 2
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("cat", "x")); // distance = 3
+
+    // Long strings (length > 3): threshold = 3
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("hello", "heo")); // distance = 2
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("testing", "teing")); // distance = 2
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("example", "exmpl")); // distance = 2
+}
+
+test "Matcher - custom configuration" {
+    const testing = std.testing;
+    const config = MatcherConfig{
+        .length_boundary = 5,
+        .threshold_short = 2,
+        .threshold_long = 4,
+    };
+    const matcher = Matcher.init(testing.allocator, config);
+
+    // Short strings (length <= 5): threshold = 2
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("hello", "heo")); // distance = 2
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("hello", "ho")); // distance = 3
+
+    // Long strings (length > 5): threshold = 4
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("testing", "tst")); // distance = 3
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match("example", "expl")); // distance = 2
+}
+
+test "Matcher - edge cases: empty strings" {
+    const testing = std.testing;
+    const matcher = Matcher.initDefault(testing.allocator);
+
+    // Empty string matches empty string
+    try testing.expectEqual(MatchType.exact, try matcher.match("", ""));
+
+    // Non-empty vs empty string
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("hello", ""));
+    try testing.expectEqual(MatchType.incorrect, try matcher.match("", "hello"));
+
+    // Single character
+    try testing.expectEqual(MatchType.exact, try matcher.match("a", "a"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("A", "a"));
+}
+
+test "Matcher - edge cases: special characters" {
+    const testing = std.testing;
+    const matcher = Matcher.initDefault(testing.allocator);
+
+    // Special characters are normalized out
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello!", "hello"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello?", "hello"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello-world", "helloworld"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello_world", "helloworld"));
+
+    // Numbers are normalized out (only alphabetic characters kept)
+    try testing.expectEqual(MatchType.exact, try matcher.match("test123", "test"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("123test", "test"));
+}
+
+test "Matcher - edge cases: long strings" {
+    const testing = std.testing;
+    const matcher = Matcher.initDefault(testing.allocator);
+
+    const long_expected = "this is a very long string that tests the matcher behavior with longer inputs";
+    const long_actual_exact = "this is a very long string that tests the matcher behavior with longer inputs";
+    const long_actual_fuzzy = "this is a very long string that tests the matcher behavor with longer inputs"; // 'i' missing
+    const long_actual_wrong = "completely different long string with nothing in common whatsoever";
+
+    try testing.expectEqual(MatchType.exact, try matcher.match(long_expected, long_actual_exact));
+    try testing.expectEqual(MatchType.fuzzy, try matcher.match(long_expected, long_actual_fuzzy));
+    try testing.expectEqual(MatchType.incorrect, try matcher.match(long_expected, long_actual_wrong));
+}
+
+test "Matcher - edge cases: multiple spaces and tabs" {
+    const testing = std.testing;
+    const matcher = Matcher.initDefault(testing.allocator);
+
+    // Multiple spaces collapsed to single space
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello    world", "hello world"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello\t\tworld", "hello world"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("  hello  world  ", "hello world"));
+
+    // Leading and trailing whitespace handled
+    try testing.expectEqual(MatchType.exact, try matcher.match("   hello", "hello"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("hello   ", "hello"));
+}
+
+test "Matcher - normalization isolates matching logic" {
+    const testing = std.testing;
+    const matcher = Matcher.initDefault(testing.allocator);
+
+    // These should all be considered exact matches after normalization
+    try testing.expectEqual(MatchType.exact, try matcher.match("Hello World!", "hello world"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("HELLO-WORLD", "helloworld"));
+    try testing.expectEqual(MatchType.exact, try matcher.match("  HeLLo   WoRLd  ", "hello world"));
 }
