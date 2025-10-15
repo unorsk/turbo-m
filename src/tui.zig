@@ -65,7 +65,21 @@ const Model = struct {
                     self.last_item = current_item;
 
                     // Submit answer to training session
-                    const match_type = try self.session.submitAnswer(user_input);
+                    const match_type = self.session.submitAnswer(user_input) catch |err| {
+                        // Handle errors gracefully
+                        switch (err) {
+                            error.OutOfMemory => {
+                                log.err("Out of memory during session shuffle", .{});
+                                ctx.quit = true;
+                                return error.OutOfMemory;
+                            },
+                            error.SessionCompleted => {
+                                ctx.quit = true;
+                                return;
+                            },
+                            else => return err,
+                        }
+                    };
                     self.last_match_type = match_type;
 
                     if (match_type == .exact) {

@@ -145,13 +145,13 @@ pub const srs = struct {
             }
 
             // Move to next item
-            self.advance();
+            try self.advance();
 
             return match_type;
         }
 
         /// Advance to the next incomplete item, reshuffling if necessary
-        fn advance(self: *TrainingSession) void {
+        fn advance(self: *TrainingSession) !void {
             // Find next incomplete item
             var found = false;
             const start_index = self.current_index + 1;
@@ -167,12 +167,12 @@ pub const srs = struct {
 
             if (!found) {
                 // Need to reshuffle and start new round
-                self.reshuffleIncomplete();
+                try self.reshuffleIncomplete();
             }
         }
 
         /// Reshuffle incomplete items and start a new round
-        fn reshuffleIncomplete(self: *TrainingSession) void {
+        fn reshuffleIncomplete(self: *TrainingSession) !void {
             // Count incomplete items
             var incomplete_count: usize = 0;
             for (self.tracked_items) |tracked_item| {
@@ -186,7 +186,7 @@ pub const srs = struct {
             }
 
             // Collect incomplete items
-            var incomplete_items = self.allocator.alloc(TrackedItem, incomplete_count) catch return;
+            var incomplete_items = try self.allocator.alloc(TrackedItem, incomplete_count);
             defer self.allocator.free(incomplete_items);
 
             var idx: usize = 0;
