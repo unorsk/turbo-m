@@ -1,6 +1,24 @@
 const std = @import("std");
 const types = @import("types.zig");
 const root = @import("root.zig");
+const builtin = @import("builtin");
+
+fn getVoiceForLanguage(lang: []const u8) ?[]const u8 {
+    _ = lang;
+    return "Anna";
+}
+
+fn say(message: []const u8, alloc: std.mem.Allocator) !void {
+    const language = "de";
+    if (builtin.target.os.tag.isDarwin()) {
+        if (getVoiceForLanguage(language)) |voice| {
+            _ = try std.process.Child.run(.{
+                .allocator = alloc,
+                .argv = &[_][]const u8{ "say", "-v", voice, message },
+            });
+        }
+    }
+}
 
 /// SessionController manages the state and business logic of a training session
 /// This is separated from UI concerns to make the logic testable and reusable
@@ -93,6 +111,8 @@ pub const SessionController = struct {
 
                 // Transition to showing feedback if not exact match
                 if (match_type != .exact) {
+                    const tracked_item = &self.session.tracked_items[self.session.current_index - 1];
+                    try say(tracked_item.item.back, self.allocator);
                     // Need to allocate a copy of the answer for the feedback state
                     const answer_copy = try self.allocator.dupe(u8, answer);
                     self.current_state = State{
