@@ -135,8 +135,9 @@ const Model = struct {
 
         const front_child: vxfw.SubSurface = .{
             .origin = .{
-                .row = @divTrunc(max_size.height, 2) - 3,
-                .col = @divTrunc(max_size.width, 2) - @divTrunc(front_surface.size.width, 2),
+                .row = @divTrunc(max_size.height, 2) - 1,
+                // .col = @divTrunc(max_size.width, 2) - @divTrunc(front_surface.size.width, 2),
+                .col = @divTrunc(max_size.width, 2) - 30,
             },
             .surface = front_surface,
         };
@@ -188,20 +189,32 @@ const Model = struct {
     }
 
     fn drawFeedbackView(self: *Model, ctx: vxfw.DrawContext, max_size: vxfw.Size, feedback: anytype) !vxfw.Surface {
+        const front_text: vxfw.Text = .{ .text = feedback.item.front };
+        const front_surface = try front_text.draw(ctx);
+
+        const front_child: vxfw.SubSurface = .{
+            .origin = .{
+                .row = @divTrunc(max_size.height, 2) - 1,
+                // .col = @divTrunc(max_size.width, 2) - @divTrunc(front_surface.size.width, 2),
+                .col = @divTrunc(max_size.width, 2) - 30,
+            },
+            .surface = front_surface,
+        };
+
         const status_text_str = if (feedback.match_type == .fuzzy) "≈" else "⚠️";
-        const correct_text_str = try std.fmt.allocPrint(ctx.arena, "{s} Correct answer: {s}", .{ status_text_str, feedback.item.back });
+        const correct_text_str = try std.fmt.allocPrint(ctx.arena, "{s}  {s}", .{ status_text_str, feedback.item.back });
         const correct_text: vxfw.Text = .{ .text = correct_text_str };
         const correct_surface = try correct_text.draw(ctx);
 
         const correct_child: vxfw.SubSurface = .{
             .origin = .{
-                .row = @divTrunc(max_size.height, 2) - 3,
-                .col = @divTrunc(max_size.width, 2) - @divTrunc(correct_surface.size.width, 2),
+                .row = @divTrunc(max_size.height, 2) + 1,
+                .col = @divTrunc(max_size.width, 2) - 34,
             },
             .surface = correct_surface,
         };
 
-        const continue_text: vxfw.Text = .{ .text = "Press any key to continue..." };
+        const continue_text: vxfw.Text = .{ .text = "Press any key to continue...", .style = .{ .fg = .{ .rgb = .{ 0xCC, 0xCC, 0xCC } } } };
         const continue_surface = try continue_text.draw(ctx);
 
         const continue_child: vxfw.SubSurface = .{
@@ -229,10 +242,11 @@ const Model = struct {
             .surface = border_surface,
         };
 
-        const children = try ctx.arena.alloc(vxfw.SubSurface, 3);
+        const children = try ctx.arena.alloc(vxfw.SubSurface, 4);
         children[0] = correct_child;
         children[1] = continue_child;
         children[2] = text_field_child;
+        children[3] = front_child;
 
         return .{
             .size = max_size,
