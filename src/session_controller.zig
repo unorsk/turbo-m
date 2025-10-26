@@ -102,6 +102,7 @@ pub const SessionController = struct {
         switch (self.current_state) {
             .showing_question => |question_state| {
                 // Submit answer to training session
+                const index = self.session.current_index;
                 const match_type = try self.session.submitAnswer(answer);
 
                 // Track errors
@@ -111,7 +112,7 @@ pub const SessionController = struct {
 
                 // Transition to showing feedback if not exact match
                 if (match_type != .exact) {
-                    const tracked_item = &self.session.tracked_items[self.session.current_index - 1];
+                    const tracked_item = &self.session.tracked_items[index];
                     try say(tracked_item.item.back, self.allocator);
                     // Need to allocate a copy of the answer for the feedback state
                     const answer_copy = try self.allocator.dupe(u8, answer);
