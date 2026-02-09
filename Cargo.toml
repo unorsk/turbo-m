@@ -1,0 +1,46 @@
+[package]
+name = "turbo-m"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# FSRS scheduling algorithm
+rs-fsrs = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2"
+
+# Home directory resolution
+dirs = "6"
+
+# Readline for drill TUI
+rustyline = "17"
+
+# Unicode normalization for drill
+unicode-normalization = "0.1"
+
+# Shuffle for drill
+rand = "0.9"
+
+[[bin]]
+name = "turbo-m"
+path = "src/main.rs"
+
+[[bin]]
+name = "drill"
+path = "src/bin/drill.rs"
+
+
