@@ -100,18 +100,6 @@ turbo-m stats --deck "German A1"
 
 Shows deck overview, due forecast, card maturity distribution, review activity (last 30 days), and rating distribution.
 
-## Contribution Tiles
-
-GitHub-style activity heatmap for review history.
-
-```sh
-turbo-m tiles
-turbo-m tiles --deck "German A1"
-turbo-m tiles --weeks 26
-```
-
-Default: 52 weeks. Shows review count per day with streak info.
-
 ## Pipe Workflow
 
 The intended pipeline: `turbo-m fetch → TUI → turbo-m review`

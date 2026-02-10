@@ -65,15 +65,7 @@ enum Commands {
         #[arg(long)]
         deck: Option<String>,
     },
-    /// Show GitHub-style contribution tiles
-    Tiles {
-        /// Show tiles for a specific deck only
-        #[arg(long)]
-        deck: Option<String>,
-        /// Number of weeks to display (default: 52)
-        #[arg(long, default_value = "52")]
-        weeks: usize,
-    },
+
 }
 
 #[derive(Subcommand)]
@@ -206,10 +198,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Stats { deck } => {
             turbo_m::cli::stats::run(tm.conn(), deck.as_deref());
-        }
-
-        Commands::Tiles { deck, weeks } => {
-            turbo_m::cli::tiles::run(tm.conn(), deck.as_deref(), weeks);
         }
     }
 
