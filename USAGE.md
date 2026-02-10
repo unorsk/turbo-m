@@ -91,14 +91,16 @@ echo '[{"card_id":1,"rating":3},{"card_id":2,"rating":1}]' | turbo-m review
 ## Statistics
 
 ```sh
-# All decks
-turbo-m stats
-
-# Specific deck
-turbo-m stats --deck "German A1"
+turbo-m stats                            # all sections, all decks
+turbo-m stats --deck "German A1"         # all sections, one deck
+turbo-m stats overview                   # deck overview table
+turbo-m stats due                        # due forecast
+turbo-m stats maturity                   # card maturity distribution
+turbo-m stats review                     # review activity (last 30 days)
+turbo-m stats dist                       # rating distribution
 ```
 
-Shows deck overview, due forecast, card maturity distribution, review activity (last 30 days), and rating distribution.
+Subcommands accept `--deck` to filter by deck.
 
 ## Pipe Workflow
 

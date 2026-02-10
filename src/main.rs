@@ -59,13 +59,28 @@ enum Commands {
     },
     /// Process review results (reads JSON array of {card_id, rating} from stdin)
     Review,
-    /// Show learning statistics
+    /// Show learning statistics (all sections if no subcommand given)
     Stats {
         /// Show stats for a specific deck only
         #[arg(long)]
         deck: Option<String>,
+        #[command(subcommand)]
+        section: Option<StatsSection>,
     },
+}
 
+#[derive(Subcommand)]
+enum StatsSection {
+    /// Deck overview table
+    Overview,
+    /// Due forecast
+    Due,
+    /// Card maturity distribution
+    Maturity,
+    /// Review activity (last 30 days)
+    Review,
+    /// Rating distribution
+    Dist,
 }
 
 #[derive(Subcommand)]
@@ -196,8 +211,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
 
-        Commands::Stats { deck } => {
-            turbo_m::cli::stats::run(tm.conn(), deck.as_deref());
+        Commands::Stats { deck, section } => {
+            let conn = tm.conn();
+            let df = deck.as_deref();
+            match section {
+                None => turbo_m::cli::stats::run_all(conn, df),
+                Some(StatsSection::Overview) => turbo_m::cli::stats::print_overview(conn, df),
+                Some(StatsSection::Due) => turbo_m::cli::stats::print_forecast(conn, df),
+                Some(StatsSection::Maturity) => turbo_m::cli::stats::print_maturity(conn, df),
+                Some(StatsSection::Review) => turbo_m::cli::stats::print_activity(conn, df),
+                Some(StatsSection::Dist) => turbo_m::cli::stats::print_ratings(conn, df),
+            }
         }
     }
 
