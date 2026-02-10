@@ -99,9 +99,9 @@ pub fn update_deck(
             },
         )
         .map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => AppError::DeckNotFound(final_name.to_string()),
-        other => AppError::Db(other),
-    })?;
+            rusqlite::Error::QueryReturnedNoRows => AppError::DeckNotFound(final_name.to_string()),
+            other => AppError::Db(other),
+        })?;
 
     tx.commit()?;
     Ok(deck)
