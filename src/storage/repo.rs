@@ -13,7 +13,10 @@ fn deck_id_by_name(conn: &Connection, name: &str) -> Result<i64, AppError> {
         params![name],
         |row| row.get(0),
     )
-    .map_err(|_| AppError::DeckNotFound(name.to_string()))
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::DeckNotFound(name.to_string()),
+        other => AppError::Db(other),
+    })
 }
 
 // ── Deck operations ──────────────────────────────────────────────────────
@@ -95,7 +98,10 @@ pub fn update_deck(
                 })
             },
         )
-        .map_err(|_| AppError::DeckNotFound(final_name.to_string()))?;
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::DeckNotFound(final_name.to_string()),
+            other => AppError::Db(other),
+        })?;
 
     tx.commit()?;
     Ok(deck)
@@ -256,7 +262,10 @@ fn get_card_row(conn: &Connection, card_id: i64) -> Result<CardRow, AppError> {
             })
         },
     )
-    .map_err(|_| AppError::CardNotFound(card_id))
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::CardNotFound(card_id),
+        other => AppError::Db(other),
+    })
 }
 
 /// Process a batch of review submissions: update FSRS state and write to revlog.
@@ -511,6 +520,92 @@ mod tests {
         assert!(
             original_exists,
             "deck must still be named 'orig' — rename should have been rolled back"
+        );
+    }
+
+    // ── Error handling tests ─────────────────────────────────────────
+
+    #[test]
+    fn deck_id_by_name_returns_deck_not_found_for_missing_deck() {
+        let conn = test_conn();
+        let err = deck_id_by_name(&conn, "nonexistent").unwrap_err();
+        assert!(
+            matches!(err, AppError::DeckNotFound(ref name) if name == "nonexistent"),
+            "expected DeckNotFound, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn deck_id_by_name_returns_db_error_on_schema_issue() {
+        let conn = Connection::open_in_memory().unwrap();
+        let err = deck_id_by_name(&conn, "anything").unwrap_err();
+        assert!(
+            matches!(err, AppError::Db(_)),
+            "expected Db error when table doesn't exist, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn get_card_row_returns_card_not_found_for_missing_card() {
+        let conn = test_conn();
+        let err = get_card_row(&conn, 9999).unwrap_err();
+        assert!(
+            matches!(err, AppError::CardNotFound(9999)),
+            "expected CardNotFound(9999), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn get_card_row_returns_db_error_on_schema_issue() {
+        let conn = Connection::open_in_memory().unwrap();
+        let err = get_card_row(&conn, 1).unwrap_err();
+        assert!(
+            matches!(err, AppError::Db(_)),
+            "expected Db error when table doesn't exist, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn add_card_to_nonexistent_deck_returns_deck_not_found() {
+        let conn = test_conn();
+        let err = add_card(&conn, "no-such-deck", serde_json::json!({"x": 1})).unwrap_err();
+        assert!(
+            matches!(err, AppError::DeckNotFound(ref name) if name == "no-such-deck"),
+            "expected DeckNotFound, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn fetch_due_nonexistent_deck_returns_deck_not_found() {
+        let conn = test_conn();
+        let err = fetch_due(&conn, "ghost", 10).unwrap_err();
+        assert!(
+            matches!(err, AppError::DeckNotFound(ref name) if name == "ghost"),
+            "expected DeckNotFound, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn process_reviews_missing_card_returns_card_not_found() {
+        let conn = test_conn();
+        let reviews = vec![ReviewSubmission {
+            card_id: 42,
+            rating: 3,
+        }];
+        let err = process_reviews(&conn, &reviews).unwrap_err();
+        assert!(
+            matches!(err, AppError::CardNotFound(42)),
+            "expected CardNotFound(42), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn update_deck_nonexistent_returns_deck_not_found() {
+        let conn = test_conn();
+        let err = update_deck(&conn, "nope", Some("new-name"), None, None).unwrap_err();
+        assert!(
+            matches!(err, AppError::DeckNotFound(ref name) if name == "nope"),
+            "expected DeckNotFound, got: {err:?}"
         );
     }
 
