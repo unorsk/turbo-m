@@ -144,12 +144,12 @@ tm.process_reviews(&reviews)?;
 Typing drill using the same database. Shows card back as prompt, you type the front.
 
 ```
-drill [--db <path>] --deck <name> [--limit <n>] [--new]
+turbo-m-drill [--db <path>] --deck <name> [--limit <n>] [--new]
 ```
 
 ```sh
-drill --deck "German A1"              # due cards
-drill --deck "German A1" --new --limit 10  # new cards
+turbo-m-drill --deck "German A1"              # due cards
+turbo-m-drill --deck "German A1" --new --limit 10  # new cards
 ```
 
 ### How it works

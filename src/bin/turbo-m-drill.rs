@@ -12,7 +12,7 @@ const RED: &str = "\x1b[31m";
 const RESET: &str = "\x1b[0m";
 
 #[derive(Parser)]
-#[command(name = "drill", about = "Spaced repetition drill TUI")]
+#[command(name = "turbo-m-drill", about = "Spaced repetition drill TUI")]
 struct Cli {
     /// Path to the SQLite database file (default: ~/.turbo-m.db)
     #[arg(long)]
