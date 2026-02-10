@@ -511,10 +511,7 @@ pub fn print_ratings(conn: &Connection, deck_filter: Option<&str>) {
     for (i, (&count, label)) in dist.iter().zip(labels.iter()).enumerate() {
         let pct = count as f64 / total as f64 * 100.0;
         let bar = render_bar(count, max_count, bar_width, colors[i]);
-        println!(
-            "{label}  {:>4}  [{pct:>5.1}%]  {bar}",
-            count,
-        );
+        println!("{label}  {:>4}  [{pct:>5.1}%]  {bar}", count,);
     }
 }
 
