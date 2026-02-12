@@ -26,13 +26,13 @@ thiserror = "2"
 # Home directory resolution
 dirs = "6"
 
-# Readline for drill TUI
+# Readline for turbo-m-drill TUI
 rustyline = "17"
 
-# Unicode normalization for drill
+# Unicode normalization for turbo-m-drill
 unicode-normalization = "0.1"
 
-# Shuffle for drill
+# Shuffle for turbo-m-drill
 rand = "0.9"
 
 [[bin]]
@@ -40,7 +40,7 @@ name = "turbo-m"
 path = "src/main.rs"
 
 [[bin]]
-name = "drill"
-path = "src/bin/drill.rs"
+name = "turbo-m-drill"
+path = "src/bin/turbo-m-drill.rs"
 
 

@@ -12,7 +12,7 @@ const RED: &str = "\x1b[31m";
 const RESET: &str = "\x1b[0m";
 
 #[derive(Parser)]
-#[command(name = "drill", about = "Spaced repetition drill TUI")]
+#[command(name = "turbo-m-drill", about = "Spaced repetition drill TUI")]
 struct Cli {
     /// Path to the SQLite database file (default: ~/.turbo-m.db)
     #[arg(long)]
@@ -88,6 +88,7 @@ enum AttemptResult {
     Correct,
     Typo,
     Wrong,
+    Empty,
 }
 
 fn default_db_path() -> PathBuf {
@@ -173,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let card_id = dc.card.id;
 
         let result = if normalized_input.is_empty() {
-            AttemptResult::Wrong
+            AttemptResult::Empty
         } else if normalized_input == normalized_word {
             AttemptResult::Correct
         } else {
@@ -221,7 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
                 }
             }
-            AttemptResult::Wrong => {
+            AttemptResult::Wrong | AttemptResult::Empty => {
                 println!("{RED}{}{RESET}", dc.front);
                 let _ = rl.readline("");
                 queue.push(DrillCard {
@@ -245,9 +246,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into_iter()
         .map(|(card_id, result)| {
             let rating = match result {
-                AttemptResult::Wrong => 1,
-                AttemptResult::Typo => 2,
-                AttemptResult::Correct => 3,
+                AttemptResult::Empty => 1,
+                AttemptResult::Wrong => 2,
+                AttemptResult::Typo => 3,
+                AttemptResult::Correct => 4,
             };
             ReviewSubmission { card_id, rating }
         })
