@@ -415,6 +415,57 @@ mod tests {
         );
     }
 
+    // ── count_due tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn count_due_counts_past_due_cards() {
+        let conn = test_conn();
+        let (deck_name, card_id) = seed_one_card(&conn);
+
+        let past = chrono::Utc::now() - chrono::Duration::hours(1);
+        conn.execute(
+            "UPDATE cards SET state = 1, due = ?1 WHERE id = ?2",
+            params![past.to_rfc3339(), card_id],
+        )
+        .unwrap();
+
+        assert_eq!(count_due(&conn, &deck_name).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_due_excludes_new_cards() {
+        let conn = test_conn();
+        let (deck_name, _card_id) = seed_one_card(&conn);
+
+        // Card is state=0 (New) by default — should not be counted.
+        assert_eq!(count_due(&conn, &deck_name).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_due_excludes_future_cards() {
+        let conn = test_conn();
+        let (deck_name, card_id) = seed_one_card(&conn);
+
+        let future = chrono::Utc::now() + chrono::Duration::hours(1);
+        conn.execute(
+            "UPDATE cards SET state = 1, due = ?1 WHERE id = ?2",
+            params![future.to_rfc3339(), card_id],
+        )
+        .unwrap();
+
+        assert_eq!(count_due(&conn, &deck_name).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_due_nonexistent_deck_returns_deck_not_found() {
+        let conn = test_conn();
+        let err = count_due(&conn, "ghost").unwrap_err();
+        assert!(
+            matches!(err, AppError::DeckNotFound(ref name) if name == "ghost"),
+            "expected DeckNotFound, got: {err:?}"
+        );
+    }
+
     // ── update_deck atomicity tests ────────────────────────────────────
 
     /// A successful update_deck with all three fields should apply all changes.
