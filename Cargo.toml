@@ -35,6 +35,9 @@ unicode-normalization = "0.1"
 # Shuffle for turbo-m-drill
 rand = "0.9"
 
+# Terminal manipulation for turbo-m-drill deck picker
+crossterm = "0.28"
+
 [[bin]]
 name = "turbo-m"
 path = "src/main.rs"

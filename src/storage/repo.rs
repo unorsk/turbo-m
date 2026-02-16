@@ -211,6 +211,18 @@ pub fn fetch_due(conn: &Connection, deck_name: &str, limit: u32) -> Result<Vec<C
     Ok(cards)
 }
 
+/// Count cards that are due for review in a deck (state != New, due <= now).
+pub fn count_due(conn: &Connection, deck_name: &str) -> Result<u32, AppError> {
+    let deck_id = deck_id_by_name(conn, deck_name)?;
+    let now = Utc::now().to_rfc3339();
+    let count: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM cards WHERE deck_id = ?1 AND state != 0 AND due <= ?2",
+        params![deck_id, now],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
 /// Fetch new (unreviewed) cards for a warm-up session.
 pub fn fetch_new(conn: &Connection, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
     let deck_id = deck_id_by_name(conn, deck_name)?;
@@ -400,6 +412,57 @@ mod tests {
             due_cards.len(),
             0,
             "fetch_due must NOT return cards whose due date is in the future"
+        );
+    }
+
+    // ── count_due tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn count_due_counts_past_due_cards() {
+        let conn = test_conn();
+        let (deck_name, card_id) = seed_one_card(&conn);
+
+        let past = chrono::Utc::now() - chrono::Duration::hours(1);
+        conn.execute(
+            "UPDATE cards SET state = 1, due = ?1 WHERE id = ?2",
+            params![past.to_rfc3339(), card_id],
+        )
+        .unwrap();
+
+        assert_eq!(count_due(&conn, &deck_name).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_due_excludes_new_cards() {
+        let conn = test_conn();
+        let (deck_name, _card_id) = seed_one_card(&conn);
+
+        // Card is state=0 (New) by default — should not be counted.
+        assert_eq!(count_due(&conn, &deck_name).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_due_excludes_future_cards() {
+        let conn = test_conn();
+        let (deck_name, card_id) = seed_one_card(&conn);
+
+        let future = chrono::Utc::now() + chrono::Duration::hours(1);
+        conn.execute(
+            "UPDATE cards SET state = 1, due = ?1 WHERE id = ?2",
+            params![future.to_rfc3339(), card_id],
+        )
+        .unwrap();
+
+        assert_eq!(count_due(&conn, &deck_name).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_due_nonexistent_deck_returns_deck_not_found() {
+        let conn = test_conn();
+        let err = count_due(&conn, "ghost").unwrap_err();
+        assert!(
+            matches!(err, AppError::DeckNotFound(ref name) if name == "ghost"),
+            "expected DeckNotFound, got: {err:?}"
         );
     }
 
