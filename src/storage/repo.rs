@@ -211,6 +211,18 @@ pub fn fetch_due(conn: &Connection, deck_name: &str, limit: u32) -> Result<Vec<C
     Ok(cards)
 }
 
+/// Count cards that are due for review in a deck (state != New, due <= now).
+pub fn count_due(conn: &Connection, deck_name: &str) -> Result<u32, AppError> {
+    let deck_id = deck_id_by_name(conn, deck_name)?;
+    let now = Utc::now().to_rfc3339();
+    let count: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM cards WHERE deck_id = ?1 AND state != 0 AND due <= ?2",
+        params![deck_id, now],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
 /// Fetch new (unreviewed) cards for a warm-up session.
 pub fn fetch_new(conn: &Connection, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
     let deck_id = deck_id_by_name(conn, deck_name)?;

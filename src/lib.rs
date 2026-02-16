@@ -87,6 +87,11 @@ impl TurboM {
         storage::repo::fetch_due(&self.conn, deck_name, limit)
     }
 
+    /// Count cards that are due for review in a deck.
+    pub fn count_due(&self, deck_name: &str) -> Result<u32, AppError> {
+        storage::repo::count_due(&self.conn, deck_name)
+    }
+
     /// Fetch new (never-reviewed) cards for a warm-up session.
     pub fn fetch_new(&self, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
         storage::repo::fetch_new(&self.conn, deck_name, limit)

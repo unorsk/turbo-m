@@ -1,6 +1,12 @@
+use std::io::{Write, stdout};
 use std::path::PathBuf;
 
 use clap::Parser;
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEvent},
+    terminal::{self, ClearType},
+};
 use rustyline::DefaultEditor;
 use unicode_normalization::UnicodeNormalization;
 
@@ -9,6 +15,8 @@ use turbo_m::models::{CardDTO, ReviewSubmission};
 
 const BLUE: &str = "\x1b[34m";
 const RED: &str = "\x1b[31m";
+const GREEN: &str = "\x1b[32m";
+const DIM: &str = "\x1b[2m";
 const RESET: &str = "\x1b[0m";
 
 #[derive(Parser)]
@@ -18,9 +26,9 @@ struct Cli {
     #[arg(long)]
     db: Option<PathBuf>,
 
-    /// Deck name to drill
+    /// Deck name to drill (interactive picker if omitted)
     #[arg(long)]
-    deck: String,
+    deck: Option<String>,
 
     /// Maximum number of cards to fetch
     #[arg(long, default_value = "12")]
@@ -97,15 +105,108 @@ fn default_db_path() -> PathBuf {
         .join(".turbo-m.db")
 }
 
+fn pick_deck(
+    decks: &[turbo_m::models::Deck],
+    due_counts: Option<&[u32]>,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let mut out = stdout();
+    terminal::enable_raw_mode()?;
+
+    let mut selected: usize = 0;
+
+    let render = |out: &mut std::io::Stdout, sel: usize| -> std::io::Result<()> {
+        crossterm::execute!(
+            out,
+            cursor::MoveTo(0, 0),
+            terminal::Clear(ClearType::FromCursorDown)
+        )?;
+        // write!(out, "Select a deck (↑/↓ to move, Enter to confirm):\r\n\r\n")?;
+        for (i, deck) in decks.iter().enumerate() {
+            let suffix = match due_counts {
+                Some(counts) => format!(" ({})", counts[i]),
+                None => String::new(),
+            };
+            if i == sel {
+                write!(out, "  {GREEN} {}{suffix}{RESET}\r\n", deck.name)?;
+            } else {
+                write!(out, "  {DIM}  {}{suffix}{RESET}\r\n", deck.name)?;
+            }
+        }
+        out.flush()
+    };
+
+    render(&mut out, selected)?;
+
+    loop {
+        if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+            match code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if selected > 0 {
+                        selected -= 1;
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if selected + 1 < decks.len() {
+                        selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    terminal::disable_raw_mode()?;
+                    crossterm::execute!(out, terminal::Clear(ClearType::FromCursorDown))?;
+                    return Ok(selected);
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    terminal::disable_raw_mode()?;
+                    crossterm::execute!(out, terminal::Clear(ClearType::FromCursorDown))?;
+                    std::process::exit(0);
+                }
+                _ => {}
+            }
+            render(&mut out, selected)?;
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db_path = cli.db.unwrap_or_else(default_db_path);
     let tm = TurboM::new(&db_path)?;
 
+    let deck_name = match cli.deck {
+        Some(name) => name,
+        None => {
+            let decks = tm.list_decks()?;
+            if decks.is_empty() {
+                eprintln!("No decks found. Create one with: turbo-m deck create --name <name>");
+                return Ok(());
+            }
+            let due_counts = if !cli.new {
+                let counts: Result<Vec<u32>, _> =
+                    decks.iter().map(|d| tm.count_due(&d.name)).collect();
+                let counts = counts?;
+                if counts.iter().all(|&c| c == 0) {
+                    eprintln!("No cards due right now. Come back later!");
+                    return Ok(());
+                }
+                Some(counts)
+            } else {
+                None
+            };
+
+            if decks.len() == 1 {
+                eprintln!("Using deck: {}", decks[0].name);
+                decks[0].name.clone()
+            } else {
+                let idx = pick_deck(&decks, due_counts.as_deref())?;
+                decks[idx].name.clone()
+            }
+        }
+    };
+
     let cards = if cli.new {
-        tm.fetch_new(&cli.deck, cli.limit)?
+        tm.fetch_new(&deck_name, cli.limit)?
     } else {
-        tm.fetch_due(&cli.deck, cli.limit)?
+        tm.fetch_due(&deck_name, cli.limit)?
     };
 
     if cards.is_empty() {
