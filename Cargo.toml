@@ -2,6 +2,7 @@
 name = "turbo-m"
 version = "0.1.0"
 edition = "2024"
+autobins = false
 
 [dependencies]
 # FSRS scheduling algorithm
@@ -26,24 +27,20 @@ thiserror = "2"
 # Home directory resolution
 dirs = "6"
 
-# Readline for turbo-m-drill TUI
+# Readline for drill TUI
 rustyline = "17"
 
-# Unicode normalization for turbo-m-drill
+# Unicode normalization for drill
 unicode-normalization = "0.1"
 
-# Shuffle for turbo-m-drill
+# Shuffle for drill
 rand = "0.9"
 
-# Terminal manipulation for turbo-m-drill deck picker
+# Terminal manipulation for drill deck picker
 crossterm = "0.28"
 
 [[bin]]
 name = "turbo-m"
 path = "src/main.rs"
-
-[[bin]]
-name = "turbo-m-drill"
-path = "src/bin/turbo-m-drill.rs"
 
 

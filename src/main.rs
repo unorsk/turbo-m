@@ -59,6 +59,18 @@ enum Commands {
     },
     /// Process review results (reads JSON array of {card_id, rating} from stdin)
     Review,
+    /// Interactive typing drill session
+    Drill {
+        /// Deck name to drill (interactive picker if omitted)
+        #[arg(long)]
+        deck: Option<String>,
+        /// Maximum number of cards to fetch
+        #[arg(long, default_value = "12")]
+        limit: u32,
+        /// Drill new (unreviewed) cards instead of due cards
+        #[arg(long)]
+        new: bool,
+    },
     /// Show learning statistics (all sections if no subcommand given)
     Stats {
         /// Show stats for a specific deck only
@@ -209,6 +221,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "{}",
                 serde_json::json!({"status": "ok", "processed": count})
             );
+        }
+
+        Commands::Drill { deck, limit, new } => {
+            turbo_m::cli::drill::run(&tm, deck, limit, new)?;
         }
 
         Commands::Stats { deck, section } => {

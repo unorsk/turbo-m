@@ -1,43 +1,22 @@
 use std::io::{Write, stdout};
-use std::path::PathBuf;
 
-use clap::Parser;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent},
     terminal::{self, ClearType},
 };
+use rand::seq::SliceRandom;
 use rustyline::DefaultEditor;
 use unicode_normalization::UnicodeNormalization;
 
-use turbo_m::TurboM;
-use turbo_m::models::{CardDTO, ReviewSubmission};
+use crate::TurboM;
+use crate::models::{CardDTO, Deck, ReviewSubmission};
 
 const BLUE: &str = "\x1b[34m";
 const RED: &str = "\x1b[31m";
 const GREEN: &str = "\x1b[32m";
 const DIM: &str = "\x1b[2m";
 const RESET: &str = "\x1b[0m";
-
-#[derive(Parser)]
-#[command(name = "turbo-m-drill", about = "Spaced repetition drill TUI")]
-struct Cli {
-    /// Path to the SQLite database file (default: ~/.turbo-m.db)
-    #[arg(long)]
-    db: Option<PathBuf>,
-
-    /// Deck name to drill (interactive picker if omitted)
-    #[arg(long)]
-    deck: Option<String>,
-
-    /// Maximum number of cards to fetch
-    #[arg(long, default_value = "12")]
-    limit: u32,
-
-    /// Drill new (unreviewed) cards instead of due cards
-    #[arg(long)]
-    new: bool,
-}
 
 fn normalize(s: &str) -> String {
     s.nfkd()
@@ -99,14 +78,8 @@ enum AttemptResult {
     Empty,
 }
 
-fn default_db_path() -> PathBuf {
-    dirs::home_dir()
-        .expect("Could not determine home directory")
-        .join(".turbo-m.db")
-}
-
 fn pick_deck(
-    decks: &[turbo_m::models::Deck],
+    decks: &[Deck],
     due_counts: Option<&[u32]>,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let mut out = stdout();
@@ -120,7 +93,6 @@ fn pick_deck(
             cursor::MoveTo(0, 0),
             terminal::Clear(ClearType::FromCursorDown)
         )?;
-        // write!(out, "Select a deck (↑/↓ to move, Enter to confirm):\r\n\r\n")?;
         for (i, deck) in decks.iter().enumerate() {
             let suffix = match due_counts {
                 Some(counts) => format!(" ({})", counts[i]),
@@ -165,12 +137,13 @@ fn pick_deck(
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-    let db_path = cli.db.unwrap_or_else(default_db_path);
-    let tm = TurboM::new(&db_path)?;
-
-    let deck_name = match cli.deck {
+pub fn run(
+    tm: &TurboM,
+    deck: Option<String>,
+    limit: u32,
+    new: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let deck_name = match deck {
         Some(name) => name,
         None => {
             let decks = tm.list_decks()?;
@@ -178,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("No decks found. Create one with: turbo-m deck create --name <name>");
                 return Ok(());
             }
-            let due_counts = if !cli.new {
+            let due_counts = if !new {
                 let counts: Result<Vec<u32>, _> =
                     decks.iter().map(|d| tm.count_due(&d.name)).collect();
                 let counts = counts?;
@@ -201,10 +174,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let cards = if cli.new {
-        tm.fetch_new(&deck_name, cli.limit)?
+    let cards = if new {
+        tm.fetch_new(&deck_name, limit)?
     } else {
-        tm.fetch_due(&deck_name, cli.limit)?
+        tm.fetch_due(&deck_name, limit)?
     };
 
     if cards.is_empty() {
@@ -224,12 +197,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    use rand::seq::SliceRandom;
     let mut rng = rand::rng();
     queue.shuffle(&mut rng);
 
-    let original_len = queue.len();
-    let mut duplicated: Vec<DrillCard> = Vec::with_capacity(original_len);
+    let mut duplicated: Vec<DrillCard> = Vec::with_capacity(queue.len());
     for dc in &queue {
         duplicated.push(DrillCard {
             card: CardDTO {
@@ -245,9 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     queue.append(&mut duplicated);
 
-    // correct_counts tracks how many correct answers per card_id
     let mut correct_counts: std::collections::HashMap<i64, u32> = std::collections::HashMap::new();
-    // first_attempt tracks the result of the very first attempt per card_id for FSRS
     let mut first_attempt: std::collections::HashMap<i64, AttemptResult> =
         std::collections::HashMap::new();
 
@@ -340,7 +309,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         idx += 1;
     }
 
-    // Build FSRS reviews from first attempts only
     let reviews: Vec<ReviewSubmission> = first_attempt
         .into_iter()
         .map(|(card_id, result)| {

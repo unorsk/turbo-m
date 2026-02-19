@@ -144,14 +144,14 @@ tm.process_reviews(&reviews)?;
 Typing drill using the same database. Shows card back as prompt, you type the front.
 
 ```
-turbo-m-drill [--db <path>] [--deck <name>] [--limit <n>] [--new]
+turbo-m drill [--deck <name>] [--limit <n>] [--new]
 ```
 
 ```sh
-turbo-m-drill --deck "German A1"              # due cards
-turbo-m-drill --deck "German A1" --new --limit 10  # new cards
-turbo-m-drill                                 # interactive deck picker → due cards
-turbo-m-drill --new                           # interactive deck picker → new cards
+turbo-m drill --deck "German A1"              # due cards
+turbo-m drill --deck "German A1" --new --limit 10  # new cards
+turbo-m drill                                 # interactive deck picker → due cards
+turbo-m drill --new                           # interactive deck picker → new cards
 ```
 
 When `--deck` is omitted, an interactive picker is shown (arrow keys / j/k to move, Enter to confirm, Esc/q to quit). If only one deck exists it is selected automatically.
