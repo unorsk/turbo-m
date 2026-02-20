@@ -755,4 +755,109 @@ mod tests {
              stored due was: {due_str}"
         );
     }
+
+    // ── fetch_hardest tests ─────────────────────────────────────────
+
+    /// Helper: seed multiple reviewed cards with explicit difficulty/lapses.
+    fn seed_reviewed_cards(
+        conn: &Connection,
+        deck_name: &str,
+        cards: &[(&str, &str, f64, i32)], // (front, back, difficulty, lapses)
+    ) -> Vec<i64> {
+        let mut ids = Vec::new();
+        for (front, back, difficulty, lapses) in cards {
+            let id = add_card(
+                conn,
+                deck_name,
+                serde_json::json!({"front": front, "back": back}),
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE cards SET state = 1, difficulty = ?1, lapses = ?2 WHERE id = ?3",
+                params![difficulty, lapses, id],
+            )
+            .unwrap();
+            ids.push(id);
+        }
+        ids
+    }
+
+    #[test]
+    fn fetch_hardest_orders_by_difficulty_desc_then_lapses_desc() {
+        let conn = test_conn();
+        let deck = "test-deck";
+        create_deck(&conn, deck, serde_json::json!({})).unwrap();
+
+        let ids = seed_reviewed_cards(
+            &conn,
+            deck,
+            &[
+                ("easy", "leicht", 1.0, 0),
+                ("hard", "schwer", 9.0, 3),
+                ("medium", "mittel", 5.0, 1),
+                ("hard2", "schwer2", 9.0, 1), // same difficulty as "hard", fewer lapses
+            ],
+        );
+
+        let result = fetch_hardest(&conn, deck, 10).unwrap();
+        assert_eq!(result.len(), 4);
+        // difficulty 9.0, lapses 3 first
+        assert_eq!(result[0].id, ids[1]);
+        // difficulty 9.0, lapses 1 second
+        assert_eq!(result[1].id, ids[3]);
+        // difficulty 5.0
+        assert_eq!(result[2].id, ids[2]);
+        // difficulty 1.0
+        assert_eq!(result[3].id, ids[0]);
+    }
+
+    #[test]
+    fn fetch_hardest_excludes_new_cards() {
+        let conn = test_conn();
+        let deck = "test-deck";
+        create_deck(&conn, deck, serde_json::json!({})).unwrap();
+
+        // One reviewed card (state=1) and one new card (state=0, default)
+        seed_reviewed_cards(&conn, deck, &[("reviewed", "r", 8.0, 2)]);
+        add_card(&conn, deck, serde_json::json!({"front":"new","back":"n"})).unwrap();
+
+        let result = fetch_hardest(&conn, deck, 10).unwrap();
+        assert_eq!(result.len(), 1, "new cards (state=0) must be excluded");
+        assert_eq!(
+            result[0].content.get("front").unwrap().as_str().unwrap(),
+            "reviewed"
+        );
+    }
+
+    #[test]
+    fn fetch_hardest_respects_limit() {
+        let conn = test_conn();
+        let deck = "test-deck";
+        create_deck(&conn, deck, serde_json::json!({})).unwrap();
+
+        seed_reviewed_cards(
+            &conn,
+            deck,
+            &[
+                ("a", "1", 9.0, 3),
+                ("b", "2", 8.0, 2),
+                ("c", "3", 7.0, 1),
+                ("d", "4", 6.0, 0),
+                ("e", "5", 5.0, 0),
+            ],
+        );
+
+        let result = fetch_hardest(&conn, deck, 3).unwrap();
+        assert_eq!(result.len(), 3, "limit must cap the number of results");
+    }
+
+    #[test]
+    fn fetch_hardest_nonexistent_deck_returns_deck_not_found() {
+        let conn = test_conn();
+        let err = fetch_hardest(&conn, "no-such-deck", 10).unwrap_err();
+        assert!(
+            matches!(err, AppError::DeckNotFound(ref name) if name == "no-such-deck"),
+            "expected DeckNotFound, got: {err:?}"
+        );
+    }
 }
