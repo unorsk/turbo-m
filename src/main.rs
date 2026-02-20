@@ -71,6 +71,18 @@ enum Commands {
         #[arg(long)]
         new: bool,
     },
+    /// Show the hardest cards in a deck (by difficulty and lapses)
+    Hardest {
+        /// Deck name
+        #[arg(long)]
+        deck: String,
+        /// Maximum number of cards to return
+        #[arg(long, default_value = "12")]
+        limit: u32,
+        /// Output full JSON instead of plain word list
+        #[arg(long)]
+        json: bool,
+    },
     /// Show learning statistics (all sections if no subcommand given)
     Stats {
         /// Show stats for a specific deck only
@@ -221,6 +233,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "{}",
                 serde_json::json!({"status": "ok", "processed": count})
             );
+        }
+
+        Commands::Hardest { deck, limit, json } => {
+            let cards = tm.fetch_hardest(&deck, limit)?;
+            if json {
+                println!("{}", serde_json::to_string(&cards)?);
+            } else {
+                for card in &cards {
+                    if let Some(front) = card.content.get("front").and_then(|v| v.as_str()) {
+                        println!("{}", front);
+                    }
+                }
+            }
         }
 
         Commands::Drill { deck, limit, new } => {

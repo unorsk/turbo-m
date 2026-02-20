@@ -12,7 +12,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use error::AppError;
-use model::{CardDTO, Deck, ImportResult, ReviewSubmission};
+use model::{CardDTO, Deck, HardestCardDTO, ImportResult, ReviewSubmission};
 
 /// Main entry point for the turbo-m library.
 ///
@@ -95,6 +95,15 @@ impl TurboM {
     /// Fetch new (never-reviewed) cards for a warm-up session.
     pub fn fetch_new(&self, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
         storage::repo::fetch_new(&self.conn, deck_name, limit)
+    }
+
+    /// Fetch the hardest cards in a deck, ranked by difficulty and lapses.
+    pub fn fetch_hardest(
+        &self,
+        deck_name: &str,
+        limit: u32,
+    ) -> Result<Vec<HardestCardDTO>, AppError> {
+        storage::repo::fetch_hardest(&self.conn, deck_name, limit)
     }
 
     // ── Review operations ────────────────────────────────────────────────

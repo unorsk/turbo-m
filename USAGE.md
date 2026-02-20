@@ -88,6 +88,18 @@ echo '[{"card_id":1,"rating":3},{"card_id":2,"rating":1}]' | turbo-m review
 # {"processed":2,"status":"ok"}
 ```
 
+## Hardest Cards
+
+Show the cards you struggle with the most, ranked by FSRS difficulty and lapse count.
+
+```sh
+turbo-m hardest --deck "German A1"              # top 12 hardest (one front per line)
+turbo-m hardest --deck "German A1" --limit 5    # top 5 hardest
+turbo-m hardest --deck "German A1" --json       # full JSON output
+```
+
+Only cards that have been reviewed at least once are included.
+
 ## Statistics
 
 ```sh

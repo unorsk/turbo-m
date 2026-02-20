@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::engine;
 use crate::error::AppError;
-use crate::model::{CardDTO, CardRow, Deck, ImportResult, ReviewSubmission};
+use crate::model::{CardDTO, CardRow, Deck, HardestCardDTO, ImportResult, ReviewSubmission};
 
 /// Look up a deck ID by name, returning DeckNotFound if missing.
 fn deck_id_by_name(conn: &Connection, name: &str) -> Result<i64, AppError> {
@@ -243,6 +243,40 @@ pub fn fetch_new(conn: &Connection, deck_name: &str, limit: u32) -> Result<Vec<C
                 content: serde_json::from_str(&content_str).unwrap_or(Value::Null),
                 due: row.get(4)?,
                 state: row.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(cards)
+}
+
+/// Fetch the hardest cards in a deck, ranked by FSRS difficulty (desc) then lapses (desc).
+/// Only includes cards that have been reviewed at least once (state != 0).
+pub fn fetch_hardest(
+    conn: &Connection,
+    deck_name: &str,
+    limit: u32,
+) -> Result<Vec<HardestCardDTO>, AppError> {
+    let deck_id = deck_id_by_name(conn, deck_name)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, deck_id, content, difficulty, lapses, reps, state
+         FROM cards
+         WHERE deck_id = ?1 AND state != 0
+         ORDER BY difficulty DESC, lapses DESC
+         LIMIT ?2",
+    )?;
+
+    let cards = stmt
+        .query_map(params![deck_id, limit], |row| {
+            let content_str: String = row.get(2)?;
+            Ok(HardestCardDTO {
+                id: row.get(0)?,
+                deck_id: row.get(1)?,
+                content: serde_json::from_str(&content_str).unwrap_or(Value::Null),
+                difficulty: row.get(3)?,
+                lapses: row.get(4)?,
+                reps: row.get(5)?,
+                state: row.get(6)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
