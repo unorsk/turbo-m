@@ -28,6 +28,18 @@ pub struct ReviewSubmission {
     pub rating: u32, // 1=Again, 2=Hard, 3=Good, 4=Easy
 }
 
+/// What the CLI outputs for the "hardest" query — includes difficulty metrics.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HardestCardDTO {
+    pub id: i64,
+    pub deck_id: i64,
+    pub content: Value,
+    pub difficulty: f64,
+    pub lapses: i32,
+    pub reps: i32,
+    pub state: u8,
+}
+
 /// Result of an import operation (returned as JSON).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ImportResult {
