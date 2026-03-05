@@ -137,8 +137,8 @@ enum DeckAction {
 }
 
 fn default_db_path() -> PathBuf {
-    dirs::home_dir()
-        .expect("Could not determine home directory")
+    std::env::current_dir()
+        .expect("Could not determine current directory")
         .join(".turbo-m.db")
 }
 

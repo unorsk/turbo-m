@@ -25,7 +25,6 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 
 # Home directory resolution
-dirs = "6"
 
 # Readline for drill TUI
 rustyline = "17"
