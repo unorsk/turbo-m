@@ -16,7 +16,4 @@ pub enum AppError {
 
     #[error("Card not found: {0}")]
     CardNotFound(i64),
-
-    #[error("Invalid rating: {0}. Must be 1 (Again), 2 (Hard), 3 (Good), or 4 (Easy)")]
-    InvalidRating(u32),
 }

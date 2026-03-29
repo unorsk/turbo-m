@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use chrono::{Duration, Utc};
 use rusqlite::{Connection, params};
 
+use crate::model::CardState;
+
 const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
 const RED: &str = "\x1b[31m";
@@ -301,22 +303,24 @@ fn maturity_distribution(conn: &Connection, deck_filter: Option<&str>) -> Vec<(S
     ];
 
     let mut stmt = conn.prepare(&sql).unwrap();
-    let rows: Vec<(f64, u8)> = if let Some(name) = deck_filter {
+    let rows: Vec<(f64, CardState)> = if let Some(name) = deck_filter {
         stmt.query_map(params![name], |row| {
-            Ok((row.get::<_, f64>(0)?, row.get::<_, u8>(1)?))
+            Ok((row.get::<_, f64>(0)?, row.get::<_, CardState>(1)?))
         })
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
     } else {
-        stmt.query_map([], |row| Ok((row.get::<_, f64>(0)?, row.get::<_, u8>(1)?)))
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .collect()
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, f64>(0)?, row.get::<_, CardState>(1)?))
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
     };
 
     for (stability, state) in rows {
-        let bucket = if state == 0 {
+        let bucket = if state == CardState::New {
             "New"
         } else if stability < 1.0 {
             "< 1 day"

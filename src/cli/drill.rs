@@ -10,7 +10,7 @@ use rustyline::DefaultEditor;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::TurboM;
-use crate::models::{CardDTO, Deck, ReviewSubmission};
+use crate::models::{CardDTO, Deck, Rating, ReviewSubmission};
 
 const BLUE: &str = "\x1b[34m";
 const RED: &str = "\x1b[31m";
@@ -313,10 +313,10 @@ pub fn run(
         .into_iter()
         .map(|(card_id, result)| {
             let rating = match result {
-                AttemptResult::Empty => 1,
-                AttemptResult::Wrong => 2,
-                AttemptResult::Typo => 3,
-                AttemptResult::Correct => 4,
+                AttemptResult::Empty => Rating::Again,
+                AttemptResult::Wrong => Rating::Hard,
+                AttemptResult::Typo => Rating::Good,
+                AttemptResult::Correct => Rating::Easy,
             };
             ReviewSubmission { card_id, rating }
         })
