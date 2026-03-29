@@ -2,6 +2,20 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Error for converting a raw integer to an enum variant.
+/// Wraps the descriptive message from `TryFrom` so it can be used with
+/// `FromSqlError::Other`, which requires `std::error::Error`.
+#[derive(Debug)]
+struct EnumConversionError(String);
+
+impl std::fmt::Display for EnumConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EnumConversionError {}
+
 /// Card scheduling state in the FSRS system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "u8", into = "u8")]
@@ -37,10 +51,9 @@ impl From<CardState> for u8 {
 impl FromSql for CardState {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let v = value.as_i64()?;
-        u8::try_from(v)
-            .ok()
-            .and_then(|b| CardState::try_from(b).ok())
-            .ok_or(FromSqlError::OutOfRange(v))
+        let b = u8::try_from(v).map_err(|_| FromSqlError::OutOfRange(v))?;
+        CardState::try_from(b)
+            .map_err(|msg| FromSqlError::Other(Box::new(EnumConversionError(msg))))
     }
 }
 
@@ -85,10 +98,9 @@ impl From<Rating> for u8 {
 impl FromSql for Rating {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let v = value.as_i64()?;
-        u8::try_from(v)
-            .ok()
-            .and_then(|b| Rating::try_from(b).ok())
-            .ok_or(FromSqlError::OutOfRange(v))
+        let b = u8::try_from(v).map_err(|_| FromSqlError::OutOfRange(v))?;
+        Rating::try_from(b)
+            .map_err(|msg| FromSqlError::Other(Box::new(EnumConversionError(msg))))
     }
 }
 

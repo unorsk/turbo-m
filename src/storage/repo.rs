@@ -881,10 +881,11 @@ mod tests {
         )
         .unwrap();
 
-        let result = fetch_due(&conn, &deck_name, 10);
+        let err = fetch_due(&conn, &deck_name, 10)
+            .expect_err("invalid state value 99 in DB should cause an error");
         assert!(
-            result.is_err(),
-            "invalid state value 99 in DB should cause an error"
+            matches!(err, AppError::Db(rusqlite::Error::FromSqlConversionFailure(..))),
+            "expected FromSqlConversionFailure for invalid state value, got: {err:?}"
         );
     }
 }
