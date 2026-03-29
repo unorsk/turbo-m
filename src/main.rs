@@ -259,7 +259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => turbo_m::cli::stats::run_all(conn, df),
                 Some(StatsSection::Overview) => turbo_m::cli::stats::print_overview(conn, df),
                 Some(StatsSection::Due) => turbo_m::cli::stats::print_forecast(conn, df),
-                Some(StatsSection::Maturity) => turbo_m::cli::stats::print_maturity(conn, df),
+                Some(StatsSection::Maturity) => turbo_m::cli::stats::print_maturity(conn, df)?,
                 Some(StatsSection::Review) => turbo_m::cli::stats::print_activity(conn, df),
                 Some(StatsSection::Dist) => turbo_m::cli::stats::print_ratings(conn, df),
             }

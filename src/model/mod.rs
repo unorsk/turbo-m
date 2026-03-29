@@ -99,8 +99,7 @@ impl FromSql for Rating {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let v = value.as_i64()?;
         let b = u8::try_from(v).map_err(|_| FromSqlError::OutOfRange(v))?;
-        Rating::try_from(b)
-            .map_err(|msg| FromSqlError::Other(Box::new(EnumConversionError(msg))))
+        Rating::try_from(b).map_err(|msg| FromSqlError::Other(Box::new(EnumConversionError(msg))))
     }
 }
 

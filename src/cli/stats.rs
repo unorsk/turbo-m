@@ -269,7 +269,10 @@ fn rating_distribution(conn: &Connection, deck_filter: Option<&str>) -> [usize; 
     dist
 }
 
-fn maturity_distribution(conn: &Connection, deck_filter: Option<&str>) -> Vec<(String, usize)> {
+fn maturity_distribution(
+    conn: &Connection,
+    deck_filter: Option<&str>,
+) -> Result<Vec<(String, usize)>, rusqlite::Error> {
     let deck_clause = if deck_filter.is_some() {
         "WHERE c.deck_id = (SELECT id FROM decks WHERE name = ?1)"
     } else {
@@ -302,21 +305,17 @@ fn maturity_distribution(conn: &Connection, deck_filter: Option<&str>) -> Vec<(S
         "> 3 months",
     ];
 
-    let mut stmt = conn.prepare(&sql).unwrap();
+    let mut stmt = conn.prepare(&sql)?;
     let rows: Vec<(f64, CardState)> = if let Some(name) = deck_filter {
         stmt.query_map(params![name], |row| {
             Ok((row.get::<_, f64>(0)?, row.get::<_, CardState>(1)?))
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect()
+        })?
+        .collect::<Result<Vec<_>, _>>()?
     } else {
         stmt.query_map([], |row| {
             Ok((row.get::<_, f64>(0)?, row.get::<_, CardState>(1)?))
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect()
+        })?
+        .collect::<Result<Vec<_>, _>>()?
     };
 
     for (stability, state) in rows {
@@ -340,10 +339,10 @@ fn maturity_distribution(conn: &Connection, deck_filter: Option<&str>) -> Vec<(S
         *buckets.get_mut(bucket).unwrap() += 1;
     }
 
-    order
+    Ok(order
         .iter()
         .map(|k| (k.to_string(), *buckets.get(*k).unwrap_or(&0)))
-        .collect()
+        .collect())
 }
 
 pub fn print_overview(conn: &Connection, deck_filter: Option<&str>) {
@@ -519,14 +518,14 @@ pub fn print_ratings(conn: &Connection, deck_filter: Option<&str>) {
     }
 }
 
-pub fn print_maturity(conn: &Connection, deck_filter: Option<&str>) {
-    let buckets = maturity_distribution(conn, deck_filter);
+pub fn print_maturity(conn: &Connection, deck_filter: Option<&str>) -> Result<(), rusqlite::Error> {
+    let buckets = maturity_distribution(conn, deck_filter)?;
     print_header("Card Maturity (stability)");
 
     let total: usize = buckets.iter().map(|(_, c)| c).sum();
     if total == 0 {
         println!("{DIM}No cards.{RESET}");
-        return;
+        return Ok(());
     }
 
     let max_count = buckets.iter().map(|(_, c)| *c).max().unwrap_or(1);
@@ -549,6 +548,7 @@ pub fn print_maturity(conn: &Connection, deck_filter: Option<&str>) {
             label_width = label_width,
         );
     }
+    Ok(())
 }
 
 pub fn run_all(conn: &Connection, deck_filter: Option<&str>) {
@@ -560,7 +560,9 @@ pub fn run_all(conn: &Connection, deck_filter: Option<&str>) {
 
     print_overview(conn, deck_filter);
     print_forecast(conn, deck_filter);
-    print_maturity(conn, deck_filter);
+    if let Err(e) = print_maturity(conn, deck_filter) {
+        eprintln!("Error displaying maturity stats: {e}");
+    }
     print_activity(conn, deck_filter);
     print_ratings(conn, deck_filter);
     println!();
