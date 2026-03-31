@@ -1,43 +1,40 @@
 use chrono::{DateTime, Utc};
-use rs_fsrs::{Card as FsrsCard, FSRS, Rating, State};
+use rs_fsrs::{Card as FsrsCard, FSRS, Rating as FsrsRating, State as FsrsState};
 
-use crate::error::AppError;
-use crate::model::CardRow;
+use crate::model::{CardRow, CardState, Rating};
 
-/// Create an FSRS scheduler. For now uses default parameters;
-/// deck-specific params can be added later by deserializing fsrs_params JSON.
+/// Create an FSRS scheduler with default parameters.
 pub fn make_fsrs() -> FSRS {
     FSRS::default()
 }
 
-/// Convert a user-provided integer (1-4) to an rs-fsrs Rating.
-pub fn rating_from_u32(r: u32) -> Result<Rating, AppError> {
+/// Convert our Rating to an rs-fsrs Rating.
+pub fn to_fsrs_rating(r: Rating) -> FsrsRating {
     match r {
-        1 => Ok(Rating::Again),
-        2 => Ok(Rating::Hard),
-        3 => Ok(Rating::Good),
-        4 => Ok(Rating::Easy),
-        _ => Err(AppError::InvalidRating(r)),
+        Rating::Again => FsrsRating::Again,
+        Rating::Hard => FsrsRating::Hard,
+        Rating::Good => FsrsRating::Good,
+        Rating::Easy => FsrsRating::Easy,
     }
 }
 
-/// Map rs-fsrs State to the integer stored in the database.
-pub fn state_to_u8(s: State) -> u8 {
-    match s {
-        State::New => 0,
-        State::Learning => 1,
-        State::Review => 2,
-        State::Relearning => 3,
+impl From<FsrsState> for CardState {
+    fn from(s: FsrsState) -> Self {
+        match s {
+            FsrsState::New => CardState::New,
+            FsrsState::Learning => CardState::Learning,
+            FsrsState::Review => CardState::Review,
+            FsrsState::Relearning => CardState::Relearning,
+        }
     }
 }
 
-/// Map a database integer back to rs-fsrs State.
-pub fn u8_to_state(s: u8) -> State {
+fn to_fsrs_state(s: CardState) -> FsrsState {
     match s {
-        1 => State::Learning,
-        2 => State::Review,
-        3 => State::Relearning,
-        _ => State::New,
+        CardState::New => FsrsState::New,
+        CardState::Learning => FsrsState::Learning,
+        CardState::Review => FsrsState::Review,
+        CardState::Relearning => FsrsState::Relearning,
     }
 }
 
@@ -66,7 +63,7 @@ pub(crate) fn card_row_to_fsrs(row: &CardRow) -> FsrsCard {
         scheduled_days: row.scheduled_days,
         reps: row.reps,
         lapses: row.lapses,
-        state: u8_to_state(row.state),
+        state: to_fsrs_state(row.state),
         last_review,
     }
 }

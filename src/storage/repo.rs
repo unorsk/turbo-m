@@ -4,7 +4,9 @@ use serde_json::Value;
 
 use crate::engine;
 use crate::error::AppError;
-use crate::model::{CardDTO, CardRow, Deck, HardestCardDTO, ImportResult, ReviewSubmission};
+use crate::model::{
+    CardDTO, CardRow, CardState, Deck, HardestCardDTO, ImportResult, ReviewSubmission,
+};
 
 /// Look up a deck ID by name, returning DeckNotFound if missing.
 fn deck_id_by_name(conn: &Connection, name: &str) -> Result<i64, AppError> {
@@ -330,7 +332,7 @@ pub fn process_reviews(conn: &Connection, reviews: &[ReviewSubmission]) -> Resul
         let fsrs_card = engine::card_row_to_fsrs(&card_row);
 
         // 3. Convert rating
-        let rating = engine::rating_from_u32(review.rating)?;
+        let rating = engine::to_fsrs_rating(review.rating);
 
         // 4. Run the FSRS scheduler
         let scheduling_info = fsrs.next(fsrs_card, now, rating);
@@ -344,7 +346,7 @@ pub fn process_reviews(conn: &Connection, reviews: &[ReviewSubmission]) -> Resul
                 last_review = ?9
              WHERE id = ?10",
             params![
-                engine::state_to_u8(new_card.state),
+                CardState::from(new_card.state),
                 new_card.due.to_rfc3339(),
                 new_card.stability,
                 new_card.difficulty,
@@ -379,6 +381,7 @@ pub fn process_reviews(conn: &Connection, reviews: &[ReviewSubmission]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Rating;
     use crate::storage::db;
 
     /// Helper: create an in-memory DB with schema initialized.
@@ -687,7 +690,7 @@ mod tests {
         let conn = test_conn();
         let reviews = vec![ReviewSubmission {
             card_id: 42,
-            rating: 3,
+            rating: Rating::Good,
         }];
         let err = process_reviews(&conn, &reviews).unwrap_err();
         assert!(
@@ -716,19 +719,23 @@ mod tests {
         // First review transitions New → Learning and sets a due date.
         let reviews = vec![ReviewSubmission {
             card_id,
-            rating: 1, // Again — due date will be very soon (minutes)
+            rating: Rating::Again, // Again — due date will be very soon (minutes)
         }];
         process_reviews(&conn, &reviews).unwrap();
 
-        // Verify the card is no longer state=0 (New).
-        let state: u8 = conn
+        // Verify the card is no longer New.
+        let state: CardState = conn
             .query_row(
                 "SELECT state FROM cards WHERE id = ?1",
                 params![card_id],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_ne!(state, 0, "card should have transitioned out of New state");
+        assert_ne!(
+            state,
+            CardState::New,
+            "card should have transitioned out of New state"
+        );
 
         // Read back the due date that FSRS wrote.
         let due_str: String = conn
@@ -858,6 +865,30 @@ mod tests {
         assert!(
             matches!(err, AppError::DeckNotFound(ref name) if name == "no-such-deck"),
             "expected DeckNotFound, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn fetch_due_rejects_invalid_state_from_db() {
+        let conn = test_conn();
+        let (deck_name, card_id) = seed_one_card(&conn);
+
+        // Write an invalid state value directly via SQL
+        let past = chrono::Utc::now() - chrono::Duration::hours(1);
+        conn.execute(
+            "UPDATE cards SET state = 99, due = ?1 WHERE id = ?2",
+            params![past.to_rfc3339(), card_id],
+        )
+        .unwrap();
+
+        let err = fetch_due(&conn, &deck_name, 10)
+            .expect_err("invalid state value 99 in DB should cause an error");
+        assert!(
+            matches!(
+                err,
+                AppError::Db(rusqlite::Error::FromSqlConversionFailure(..))
+            ),
+            "expected FromSqlConversionFailure for invalid state value, got: {err:?}"
         );
     }
 }
