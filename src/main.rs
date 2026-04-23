@@ -3,15 +3,25 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use turbo_m::Backend;
 use turbo_m::TurboM;
+use turbo_m::client::RemoteClient;
 use turbo_m::models::ReviewSubmission;
 
 #[derive(Parser)]
 #[command(name = "turbo-m", about = "Spaced repetition CLI using FSRS")]
 struct Cli {
-    /// Path to the SQLite database file (default: ~/.turbo-m.db)
+    /// Path to the SQLite database file (default: ./.turbo-m.db)
     #[arg(long)]
     db: Option<PathBuf>,
+
+    /// URL of the turbo-m remote API (e.g. https://turbo-m.example.workers.dev)
+    #[arg(long, env = "TURBO_M_URL")]
+    url: Option<String>,
+
+    /// Bearer token for remote API authentication
+    #[arg(long, env = "TURBO_M_TOKEN")]
+    token: Option<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -144,8 +154,18 @@ fn default_db_path() -> PathBuf {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let db_path = cli.db.unwrap_or_else(default_db_path);
-    let tm = TurboM::new(&db_path)?;
+
+    let is_remote = cli.url.is_some();
+
+    let backend = if let Some(url) = cli.url {
+        let token = cli
+            .token
+            .expect("--token (or TURBO_M_TOKEN env var) is required when using --url");
+        Backend::Remote(RemoteClient::new(url, token))
+    } else {
+        let db_path = cli.db.unwrap_or_else(default_db_path);
+        Backend::Local(TurboM::new(&db_path)?)
+    };
 
     match cli.command {
         Commands::Deck { action } => match action {
@@ -154,11 +174,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(m) => serde_json::from_str(&m)?,
                     None => serde_json::json!({}),
                 };
-                let deck = tm.create_deck(&name, metadata)?;
+                let deck = backend.create_deck(&name, metadata)?;
                 println!("{}", serde_json::to_string(&deck)?);
             }
             DeckAction::List => {
-                let decks = tm.list_decks()?;
+                let decks = backend.list_decks()?;
                 println!("{}", serde_json::to_string(&decks)?);
             }
             DeckAction::Update {
@@ -169,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 let metadata = meta.map(|m| serde_json::from_str(&m)).transpose()?;
                 let params = fsrs_params.map(|p| serde_json::from_str(&p)).transpose()?;
-                let deck = tm.update_deck(&name, rename.as_deref(), metadata, params)?;
+                let deck = backend.update_deck(&name, rename.as_deref(), metadata, params)?;
                 println!("{}", serde_json::to_string(&deck)?);
             }
         },
@@ -177,13 +197,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Add { deck, content } => {
             if let Some(content_str) = content {
                 let content_val: serde_json::Value = serde_json::from_str(&content_str)?;
-                let id = tm.add_card(&deck, content_val)?;
+                let id = backend.add_card(&deck, content_val)?;
                 println!("{}", serde_json::json!({"id": id}));
             } else {
                 let mut input = String::new();
                 std::io::stdin().read_to_string(&mut input)?;
                 let contents: Vec<serde_json::Value> = serde_json::from_str(&input)?;
-                let ids = tm.add_cards(&deck, contents)?;
+                let ids = backend.add_cards(&deck, contents)?;
                 println!("{}", serde_json::to_string(&ids)?);
             }
         }
@@ -210,15 +230,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 })
                 .collect();
-            let result = tm.import_cards(&deck, contents)?;
+            let result = backend.import_cards(&deck, contents)?;
             println!("{}", serde_json::to_string(&result)?);
         }
 
         Commands::Fetch { deck, limit, new } => {
             let cards = if new {
-                tm.fetch_new(&deck, limit)?
+                backend.fetch_new(&deck, limit)?
             } else {
-                tm.fetch_due(&deck, limit)?
+                backend.fetch_due(&deck, limit)?
             };
             println!("{}", serde_json::to_string(&cards)?);
         }
@@ -228,7 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::io::stdin().read_to_string(&mut input)?;
             let reviews: Vec<ReviewSubmission> = serde_json::from_str(&input)?;
             let count = reviews.len();
-            tm.process_reviews(&reviews)?;
+            backend.process_reviews(&reviews)?;
             println!(
                 "{}",
                 serde_json::json!({"status": "ok", "processed": count})
@@ -236,7 +256,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Hardest { deck, limit, json } => {
-            let cards = tm.fetch_hardest(&deck, limit)?;
+            let cards = backend.fetch_hardest(&deck, limit)?;
             if json {
                 println!("{}", serde_json::to_string(&cards)?);
             } else {
@@ -249,19 +269,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Drill { deck, limit, new } => {
-            turbo_m::cli::drill::run(&tm, deck, limit, new)?;
+            turbo_m::cli::drill::run(&backend, deck, limit, new)?;
         }
 
         Commands::Stats { deck, section } => {
-            let conn = tm.conn();
-            let df = deck.as_deref();
-            match section {
-                None => turbo_m::cli::stats::run_all(conn, df),
-                Some(StatsSection::Overview) => turbo_m::cli::stats::print_overview(conn, df),
-                Some(StatsSection::Due) => turbo_m::cli::stats::print_forecast(conn, df),
-                Some(StatsSection::Maturity) => turbo_m::cli::stats::print_maturity(conn, df)?,
-                Some(StatsSection::Review) => turbo_m::cli::stats::print_activity(conn, df),
-                Some(StatsSection::Dist) => turbo_m::cli::stats::print_ratings(conn, df),
+            if is_remote {
+                eprintln!("Stats are not available in remote mode.");
+                std::process::exit(1);
+            }
+            match &backend {
+                Backend::Local(tm) => {
+                    let conn = tm.conn();
+                    let df = deck.as_deref();
+                    match section {
+                        None => turbo_m::cli::stats::run_all(conn, df),
+                        Some(StatsSection::Overview) => {
+                            turbo_m::cli::stats::print_overview(conn, df)
+                        }
+                        Some(StatsSection::Due) => turbo_m::cli::stats::print_forecast(conn, df),
+                        Some(StatsSection::Maturity) => {
+                            turbo_m::cli::stats::print_maturity(conn, df)?
+                        }
+                        Some(StatsSection::Review) => turbo_m::cli::stats::print_activity(conn, df),
+                        Some(StatsSection::Dist) => turbo_m::cli::stats::print_ratings(conn, df),
+                    }
+                }
+                Backend::Remote(_) => unreachable!(),
             }
         }
     }

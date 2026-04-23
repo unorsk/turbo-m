@@ -38,9 +38,9 @@ fn to_fsrs_state(s: CardState) -> FsrsState {
     }
 }
 
-/// Convert an internal CardRow (from the DB) into an rs-fsrs Card
+/// Convert a CardRow (from the DB) into an rs-fsrs Card
 /// so we can feed it to the scheduler.
-pub(crate) fn card_row_to_fsrs(row: &CardRow) -> FsrsCard {
+pub fn card_row_to_fsrs(row: &CardRow) -> FsrsCard {
     let due = row
         .due
         .as_ref()

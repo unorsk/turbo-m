@@ -1,3 +1,7 @@
+[workspace]
+members = ["core", "worker"]
+default-members = [".", "core"]
+
 [package]
 name = "turbo-m"
 version = "0.1.0"
@@ -5,11 +9,11 @@ edition = "2024"
 autobins = false
 
 [dependencies]
-# FSRS scheduling algorithm
-rs-fsrs = "1"
+# Core library (shared models + FSRS engine)
+turbo-m-core = { path = "core", features = ["sqlite"] }
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Database
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -24,7 +28,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Error handling
 thiserror = "2"
 
-# Home directory resolution
+# HTTP client for remote backend
+ureq = { version = "3", features = ["json"] }
 
 # Readline for drill TUI
 rustyline = "17"
