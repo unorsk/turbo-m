@@ -115,11 +115,10 @@ fn pick_deck(
                 KeyCode::Up | KeyCode::Char('k') => {
                     selected = selected.saturating_sub(1);
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if selected + 1 < decks.len() {
+                KeyCode::Down | KeyCode::Char('j')
+                    if selected + 1 < decks.len() => {
                         selected += 1;
                     }
-                }
                 KeyCode::Enter => {
                     terminal::disable_raw_mode()?;
                     crossterm::execute!(out, terminal::Clear(ClearType::FromCursorDown))?;

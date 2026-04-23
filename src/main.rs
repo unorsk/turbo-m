@@ -155,8 +155,6 @@ fn default_db_path() -> PathBuf {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    let is_remote = cli.url.is_some();
-
     let backend = if let Some(url) = cli.url {
         let token = cli
             .token
@@ -273,28 +271,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Stats { deck, section } => {
-            if is_remote {
-                eprintln!("Stats are not available in remote mode.");
-                std::process::exit(1);
-            }
-            match &backend {
-                Backend::Local(tm) => {
-                    let conn = tm.conn();
-                    let df = deck.as_deref();
-                    match section {
-                        None => turbo_m::cli::stats::run_all(conn, df),
-                        Some(StatsSection::Overview) => {
-                            turbo_m::cli::stats::print_overview(conn, df)
-                        }
-                        Some(StatsSection::Due) => turbo_m::cli::stats::print_forecast(conn, df),
-                        Some(StatsSection::Maturity) => {
-                            turbo_m::cli::stats::print_maturity(conn, df)?
-                        }
-                        Some(StatsSection::Review) => turbo_m::cli::stats::print_activity(conn, df),
-                        Some(StatsSection::Dist) => turbo_m::cli::stats::print_ratings(conn, df),
-                    }
-                }
-                Backend::Remote(_) => unreachable!(),
+            let df = deck.as_deref();
+            let data = backend.fetch_stats(df)?;
+            match section {
+                None => turbo_m::cli::stats::display_all(&data, df),
+                Some(StatsSection::Overview) => turbo_m::cli::stats::print_overview(&data.overview),
+                Some(StatsSection::Due) => turbo_m::cli::stats::print_forecast(&data.forecast),
+                Some(StatsSection::Maturity) => turbo_m::cli::stats::print_maturity(&data.maturity),
+                Some(StatsSection::Review) => turbo_m::cli::stats::print_activity(&data.activity),
+                Some(StatsSection::Dist) => turbo_m::cli::stats::print_ratings(&data.ratings),
             }
         }
     }

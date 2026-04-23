@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use worker::wasm_bindgen::JsValue;
 use worker::*;
 
 use turbo_m_core::engine;
@@ -106,6 +107,284 @@ fn parse_limit_from_url(url: &Url) -> u32 {
         .find(|(k, _)| k == "limit")
         .and_then(|(_, v)| v.parse::<u32>().ok())
         .unwrap_or(12)
+}
+
+// ── Stats helpers ──────────────────────────────────────────────────────────
+
+async fn stats_overview(db: &D1Database, deck: Option<&str>) -> Result<serde_json::Value> {
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+
+    #[derive(Deserialize)]
+    struct R {
+        name: String,
+        total: Option<i64>,
+        new_count: Option<i64>,
+        learning: Option<i64>,
+        review_count: Option<i64>,
+        relearning: Option<i64>,
+        due_today: Option<i64>,
+    }
+
+    let result = if let Some(name) = deck {
+        db.prepare(
+            "SELECT d.name, COUNT(c.id) as total, \
+             SUM(CASE WHEN c.state=0 THEN 1 ELSE 0 END) as new_count, \
+             SUM(CASE WHEN c.state=1 THEN 1 ELSE 0 END) as learning, \
+             SUM(CASE WHEN c.state=2 THEN 1 ELSE 0 END) as review_count, \
+             SUM(CASE WHEN c.state=3 THEN 1 ELSE 0 END) as relearning, \
+             SUM(CASE WHEN c.state!=0 AND c.due<=?2 THEN 1 ELSE 0 END) as due_today \
+             FROM decks d LEFT JOIN cards c ON c.deck_id=d.id \
+             WHERE d.name=?1 GROUP BY d.id ORDER BY d.name",
+        )
+        .bind(&[JsValue::from(name), JsValue::from(now.as_str())])?
+        .all()
+        .await?
+    } else {
+        db.prepare(
+            "SELECT d.name, COUNT(c.id) as total, \
+             SUM(CASE WHEN c.state=0 THEN 1 ELSE 0 END) as new_count, \
+             SUM(CASE WHEN c.state=1 THEN 1 ELSE 0 END) as learning, \
+             SUM(CASE WHEN c.state=2 THEN 1 ELSE 0 END) as review_count, \
+             SUM(CASE WHEN c.state=3 THEN 1 ELSE 0 END) as relearning, \
+             SUM(CASE WHEN c.state!=0 AND c.due<=?1 THEN 1 ELSE 0 END) as due_today \
+             FROM decks d LEFT JOIN cards c ON c.deck_id=d.id \
+             GROUP BY d.id ORDER BY d.name",
+        )
+        .bind(&[JsValue::from(now.as_str())])?
+        .all()
+        .await?
+    };
+
+    let rows = result.results::<R>()?;
+    Ok(serde_json::json!(
+        rows.into_iter()
+            .map(|r| serde_json::json!({
+                "name": r.name,
+                "total": r.total.unwrap_or(0),
+                "new": r.new_count.unwrap_or(0),
+                "learning": r.learning.unwrap_or(0),
+                "review": r.review_count.unwrap_or(0),
+                "relearning": r.relearning.unwrap_or(0),
+                "due_today": r.due_today.unwrap_or(0),
+            }))
+            .collect::<Vec<_>>()
+    ))
+}
+
+async fn stats_forecast(db: &D1Database, deck: Option<&str>) -> Result<serde_json::Value> {
+    let now = chrono::Utc::now();
+    let now_s = now.to_rfc3339();
+    let d1 = (now + chrono::Duration::days(1)).to_rfc3339();
+    let d2 = (now + chrono::Duration::days(2)).to_rfc3339();
+    let d7 = (now + chrono::Duration::days(7)).to_rfc3339();
+    let d14 = (now + chrono::Duration::days(14)).to_rfc3339();
+    let d30 = (now + chrono::Duration::days(30)).to_rfc3339();
+
+    #[derive(Deserialize)]
+    struct R {
+        overdue: Option<i64>,
+        today: Option<i64>,
+        tomorrow: Option<i64>,
+        this_week: Option<i64>,
+        next_week: Option<i64>,
+        this_month: Option<i64>,
+        later: Option<i64>,
+    }
+
+    let base = "SELECT \
+        SUM(CASE WHEN due<?1 THEN 1 ELSE 0 END) as overdue, \
+        SUM(CASE WHEN due>=?1 AND due<?2 THEN 1 ELSE 0 END) as today, \
+        SUM(CASE WHEN due>=?2 AND due<?3 THEN 1 ELSE 0 END) as tomorrow, \
+        SUM(CASE WHEN due>=?3 AND due<?4 THEN 1 ELSE 0 END) as this_week, \
+        SUM(CASE WHEN due>=?4 AND due<?5 THEN 1 ELSE 0 END) as next_week, \
+        SUM(CASE WHEN due>=?5 AND due<?6 THEN 1 ELSE 0 END) as this_month, \
+        SUM(CASE WHEN due>=?6 THEN 1 ELSE 0 END) as later \
+        FROM cards WHERE state!=0 AND due IS NOT NULL";
+
+    let mut params = vec![
+        JsValue::from(now_s.as_str()),
+        JsValue::from(d1.as_str()),
+        JsValue::from(d2.as_str()),
+        JsValue::from(d7.as_str()),
+        JsValue::from(d14.as_str()),
+        JsValue::from(d30.as_str()),
+    ];
+
+    let sql = if let Some(name) = deck {
+        params.push(JsValue::from(name));
+        format!("{base} AND deck_id=(SELECT id FROM decks WHERE name=?7)")
+    } else {
+        base.to_string()
+    };
+
+    let row = db
+        .prepare(&sql)
+        .bind(&params)?
+        .first::<R>(None)
+        .await?
+        .unwrap_or(R {
+            overdue: None,
+            today: None,
+            tomorrow: None,
+            this_week: None,
+            next_week: None,
+            this_month: None,
+            later: None,
+        });
+
+    Ok(serde_json::json!([
+        {"label": "Overdue", "count": row.overdue.unwrap_or(0)},
+        {"label": "Today", "count": row.today.unwrap_or(0)},
+        {"label": "Tomorrow", "count": row.tomorrow.unwrap_or(0)},
+        {"label": "This week", "count": row.this_week.unwrap_or(0)},
+        {"label": "Next week", "count": row.next_week.unwrap_or(0)},
+        {"label": "This month", "count": row.this_month.unwrap_or(0)},
+        {"label": "Later", "count": row.later.unwrap_or(0)},
+    ]))
+}
+
+async fn stats_maturity(db: &D1Database, deck: Option<&str>) -> Result<serde_json::Value> {
+    #[derive(Deserialize)]
+    struct R {
+        new_count: Option<i64>,
+        lt_1d: Option<i64>,
+        d1_3: Option<i64>,
+        d3_7: Option<i64>,
+        w1_2: Option<i64>,
+        w2_4: Option<i64>,
+        m1_3: Option<i64>,
+        gt_3m: Option<i64>,
+    }
+
+    let base = "SELECT \
+        SUM(CASE WHEN state=0 THEN 1 ELSE 0 END) as new_count, \
+        SUM(CASE WHEN state!=0 AND stability<1.0 THEN 1 ELSE 0 END) as lt_1d, \
+        SUM(CASE WHEN state!=0 AND stability>=1.0 AND stability<3.0 THEN 1 ELSE 0 END) as d1_3, \
+        SUM(CASE WHEN state!=0 AND stability>=3.0 AND stability<7.0 THEN 1 ELSE 0 END) as d3_7, \
+        SUM(CASE WHEN state!=0 AND stability>=7.0 AND stability<14.0 THEN 1 ELSE 0 END) as w1_2, \
+        SUM(CASE WHEN state!=0 AND stability>=14.0 AND stability<30.0 THEN 1 ELSE 0 END) as w2_4, \
+        SUM(CASE WHEN state!=0 AND stability>=30.0 AND stability<90.0 THEN 1 ELSE 0 END) as m1_3, \
+        SUM(CASE WHEN state!=0 AND stability>=90.0 THEN 1 ELSE 0 END) as gt_3m \
+        FROM cards";
+
+    let row = if let Some(name) = deck {
+        let sql = format!("{base} WHERE deck_id=(SELECT id FROM decks WHERE name=?1)");
+        db.prepare(&sql)
+            .bind(&[JsValue::from(name)])?
+            .first::<R>(None)
+            .await?
+    } else {
+        db.prepare(base).first::<R>(None).await?
+    };
+
+    let r = row.unwrap_or(R {
+        new_count: None,
+        lt_1d: None,
+        d1_3: None,
+        d3_7: None,
+        w1_2: None,
+        w2_4: None,
+        m1_3: None,
+        gt_3m: None,
+    });
+
+    Ok(serde_json::json!([
+        ["New", r.new_count.unwrap_or(0)],
+        ["< 1 day", r.lt_1d.unwrap_or(0)],
+        ["1-3 days", r.d1_3.unwrap_or(0)],
+        ["3-7 days", r.d3_7.unwrap_or(0)],
+        ["1-2 weeks", r.w1_2.unwrap_or(0)],
+        ["2-4 weeks", r.w2_4.unwrap_or(0)],
+        ["1-3 months", r.m1_3.unwrap_or(0)],
+        ["> 3 months", r.gt_3m.unwrap_or(0)],
+    ]))
+}
+
+async fn stats_activity(db: &D1Database, deck: Option<&str>) -> Result<serde_json::Value> {
+    let days = 30i64;
+    let since = (chrono::Utc::now() - chrono::Duration::days(days))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    #[derive(Deserialize)]
+    struct R {
+        d: String,
+        cnt: i64,
+    }
+
+    let base = "SELECT date(r.review_date) as d, COUNT(*) as cnt FROM revlog r WHERE date(r.review_date)>=?1";
+    let (sql, params) = if let Some(name) = deck {
+        (
+            format!(
+                "{base} AND r.card_id IN (SELECT id FROM cards WHERE deck_id=\
+                 (SELECT id FROM decks WHERE name=?2)) GROUP BY d ORDER BY d ASC"
+            ),
+            vec![JsValue::from(since.as_str()), JsValue::from(name)],
+        )
+    } else {
+        (
+            format!("{base} GROUP BY d ORDER BY d ASC"),
+            vec![JsValue::from(since.as_str())],
+        )
+    };
+
+    let result = db.prepare(&sql).bind(&params)?.all().await?;
+    let rows = result.results::<R>()?;
+
+    let today = chrono::Utc::now().date_naive();
+    let start = today - chrono::Duration::days(days);
+    let mut by_date: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    for r in &rows {
+        by_date.insert(r.d.clone(), r.cnt);
+    }
+
+    let mut filled = Vec::new();
+    let mut d = start;
+    while d <= today {
+        let key = d.format("%Y-%m-%d").to_string();
+        let count = by_date.get(&key).copied().unwrap_or(0);
+        filled.push(serde_json::json!({"date": key, "count": count}));
+        d += chrono::Duration::days(1);
+    }
+
+    Ok(serde_json::json!(filled))
+}
+
+async fn stats_ratings(db: &D1Database, deck: Option<&str>) -> Result<serde_json::Value> {
+    #[derive(Deserialize)]
+    struct R {
+        rating: i64,
+        cnt: i64,
+    }
+
+    let base = "SELECT r.rating, COUNT(*) as cnt FROM revlog r";
+    let (sql, params) = if let Some(name) = deck {
+        (
+            format!(
+                "{base} WHERE r.card_id IN (SELECT id FROM cards WHERE deck_id=\
+                 (SELECT id FROM decks WHERE name=?1)) GROUP BY r.rating"
+            ),
+            vec![JsValue::from(name)],
+        )
+    } else {
+        (format!("{base} GROUP BY r.rating"), vec![])
+    };
+
+    let result = if params.is_empty() {
+        db.prepare(&sql).all().await?
+    } else {
+        db.prepare(&sql).bind(&params)?.all().await?
+    };
+
+    let rows = result.results::<R>()?;
+    let mut dist = [0i64; 4];
+    for r in rows {
+        if (1..=4).contains(&r.rating) {
+            dist[(r.rating - 1) as usize] = r.cnt;
+        }
+    }
+
+    Ok(serde_json::json!(dist))
 }
 
 // ── Route Handlers ──────────────────────────────────────────────────────────
@@ -490,6 +769,31 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 })
                 .collect();
             Response::from_json(&cards)
+        })
+        // ── Stats route ─────────────────────────────────────────────────
+        .get_async("/api/stats", |req, ctx| async move {
+            check_auth(&req, &ctx.env)?;
+            let db = get_db(&ctx.env)?;
+            let url = req.url()?;
+            let deck_filter: Option<String> = url
+                .query_pairs()
+                .find(|(k, _)| k == "deck")
+                .map(|(_, v)| v.to_string());
+            let df = deck_filter.as_deref();
+
+            let overview = stats_overview(&db, df).await?;
+            let forecast = stats_forecast(&db, df).await?;
+            let maturity = stats_maturity(&db, df).await?;
+            let activity = stats_activity(&db, df).await?;
+            let ratings = stats_ratings(&db, df).await?;
+
+            Response::from_json(&serde_json::json!({
+                "overview": overview,
+                "forecast": forecast,
+                "maturity": maturity,
+                "activity": activity,
+                "ratings": ratings,
+            }))
         })
         // ── Review routes ───────────────────────────────────────────────
         .post_async("/api/reviews", |mut req, ctx| async move {

@@ -12,6 +12,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde_json::Value;
 
+use cli::stats::StatsData;
 use error::AppError;
 use model::{CardDTO, Deck, HardestCardDTO, ImportResult, ReviewSubmission};
 
@@ -199,6 +200,13 @@ impl Backend {
         match self {
             Backend::Local(tm) => tm.process_reviews(reviews),
             Backend::Remote(c) => c.process_reviews(reviews),
+        }
+    }
+
+    pub fn fetch_stats(&self, deck: Option<&str>) -> Result<StatsData, AppError> {
+        match self {
+            Backend::Local(tm) => Ok(cli::stats::fetch_stats(tm.conn(), deck)),
+            Backend::Remote(c) => c.fetch_stats(deck),
         }
     }
 }

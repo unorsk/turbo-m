@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::cli::stats::StatsData;
 use crate::error::AppError;
 use crate::model::{CardDTO, Deck, HardestCardDTO, ImportResult, ReviewSubmission};
 
@@ -197,6 +198,15 @@ impl RemoteClient {
         let body = serde_json::to_value(reviews)?;
         self.post_json("/api/reviews", &body)?;
         Ok(())
+    }
+
+    pub fn fetch_stats(&self, deck: Option<&str>) -> Result<StatsData, AppError> {
+        let path = match deck {
+            Some(name) => format!("/api/stats?deck={}", urlencoding(name)),
+            None => "/api/stats".to_string(),
+        };
+        let resp = self.get(&path)?;
+        serde_json::from_value(resp).map_err(AppError::Json)
     }
 }
 
