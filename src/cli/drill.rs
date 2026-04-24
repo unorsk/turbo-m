@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use rustyline::DefaultEditor;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::TurboM;
+use crate::Backend;
 use crate::models::{CardDTO, Deck, Rating, ReviewSubmission};
 
 const BLUE: &str = "\x1b[34m";
@@ -115,10 +115,8 @@ fn pick_deck(
                 KeyCode::Up | KeyCode::Char('k') => {
                     selected = selected.saturating_sub(1);
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if selected + 1 < decks.len() {
-                        selected += 1;
-                    }
+                KeyCode::Down | KeyCode::Char('j') if selected + 1 < decks.len() => {
+                    selected += 1;
                 }
                 KeyCode::Enter => {
                     terminal::disable_raw_mode()?;
@@ -138,7 +136,7 @@ fn pick_deck(
 }
 
 pub fn run(
-    tm: &TurboM,
+    backend: &Backend,
     deck: Option<String>,
     limit: u32,
     new: bool,
@@ -146,14 +144,14 @@ pub fn run(
     let deck_name = match deck {
         Some(name) => name,
         None => {
-            let decks = tm.list_decks()?;
+            let decks = backend.list_decks()?;
             if decks.is_empty() {
                 eprintln!("No decks found. Create one with: turbo-m deck create --name <name>");
                 return Ok(());
             }
             let due_counts = if !new {
                 let counts: Result<Vec<u32>, _> =
-                    decks.iter().map(|d| tm.count_due(&d.name)).collect();
+                    decks.iter().map(|d| backend.count_due(&d.name)).collect();
                 let counts = counts?;
                 if counts.iter().all(|&c| c == 0) {
                     eprintln!("No cards due right now. Come back later!");
@@ -175,9 +173,9 @@ pub fn run(
     };
 
     let cards = if new {
-        tm.fetch_new(&deck_name, limit)?
+        backend.fetch_new(&deck_name, limit)?
     } else {
-        tm.fetch_due(&deck_name, limit)?
+        backend.fetch_due(&deck_name, limit)?
     };
 
     if cards.is_empty() {
@@ -323,7 +321,7 @@ pub fn run(
         .collect();
 
     if !reviews.is_empty() {
-        tm.process_reviews(&reviews)?;
+        backend.process_reviews(&reviews)?;
         eprintln!("Processed {} reviews.", reviews.len());
     }
 

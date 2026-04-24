@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::{Duration, Utc};
 use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
 
 use crate::model::CardState;
 
@@ -16,6 +17,52 @@ const RESET: &str = "\x1b[0m";
 
 const BAR_CHAR: &str = "∎";
 
+// ── Data types (shared with remote) ─────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeckStats {
+    pub name: String,
+    pub total: usize,
+    pub new: usize,
+    pub learning: usize,
+    pub review: usize,
+    pub relearning: usize,
+    pub due_today: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ForecastBucket {
+    pub label: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReviewDay {
+    pub date: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StatsData {
+    pub overview: Vec<DeckStats>,
+    pub forecast: Vec<ForecastBucket>,
+    pub maturity: Vec<(String, usize)>,
+    pub activity: Vec<ReviewDay>,
+    pub ratings: [usize; 4],
+}
+
+// ── Data fetching (local SQLite) ────────────────────────────────────────────
+
+pub fn fetch_stats(conn: &Connection, deck_filter: Option<&str>) -> StatsData {
+    StatsData {
+        overview: deck_overview(conn, deck_filter),
+        forecast: due_forecast(conn, deck_filter),
+        maturity: maturity_distribution(conn, deck_filter).unwrap_or_default(),
+        activity: review_activity(conn, deck_filter, 30),
+        ratings: rating_distribution(conn, deck_filter),
+    }
+}
+
 fn render_bar(value: usize, max_value: usize, max_width: usize, color: &str) -> String {
     if max_value == 0 || value == 0 {
         return String::new();
@@ -23,32 +70,6 @@ fn render_bar(value: usize, max_value: usize, max_width: usize, color: &str) -> 
     let width = ((value as f64 / max_value as f64) * max_width as f64).ceil() as usize;
     let width = width.max(1).min(max_width);
     format!("{color}{}{RESET}", BAR_CHAR.repeat(width))
-}
-
-struct DeckStats {
-    name: String,
-    total: usize,
-    new: usize,
-    learning: usize,
-    review: usize,
-    relearning: usize,
-    due_today: usize,
-}
-
-struct ForecastBucket {
-    label: String,
-    count: usize,
-}
-
-struct ReviewDay {
-    date: String,
-    count: usize,
-}
-
-fn print_header(title: &str) {
-    println!();
-    println!("{title}");
-    println!();
 }
 
 fn deck_overview(conn: &Connection, deck_filter: Option<&str>) -> Vec<DeckStats> {
@@ -345,38 +366,33 @@ fn maturity_distribution(
         .collect())
 }
 
-pub fn print_overview(conn: &Connection, deck_filter: Option<&str>) {
-    let decks = deck_overview(conn, deck_filter);
+// ── Display functions (work with data, no DB needed) ────────────────────────
+
+fn print_header(title: &str) {
+    println!();
+    println!("{title}");
+    println!();
+}
+
+pub fn print_overview(data: &[DeckStats]) {
     print_header("Deck Overview");
 
-    if decks.is_empty() {
+    if data.is_empty() {
         println!("{DIM}No decks found.{RESET}");
         return;
     }
 
-    let name_width = decks
-        .iter()
-        .map(|d| d.name.len())
-        .max()
-        .unwrap_or(10)
-        .max(4);
+    let name_width = data.iter().map(|d| d.name.len()).max().unwrap_or(10).max(4);
 
     println!(
         "{DIM}{:<name_width$}  {:>5}  {:>5}  {:>5}  {:>5}  {:>5}  {:>5}{RESET}",
-        "Deck",
-        "Total",
-        "New",
-        "Lrn",
-        "Rev",
-        "ReLrn",
-        "Due",
-        name_width = name_width,
+        "Deck", "Total", "New", "Lrn", "Rev", "ReLrn", "Due",
     );
 
-    let max_total = decks.iter().map(|d| d.total).max().unwrap_or(1);
+    let max_total = data.iter().map(|d| d.total).max().unwrap_or(1);
     let bar_width = 30;
 
-    for d in &decks {
+    for d in data {
         let due_color = if d.due_today > 0 { YELLOW } else { DIM };
         println!(
             "{:<name_width$}  {:>5}  {GREEN}{:>5}{RESET}  {YELLOW}{:>5}{RESET}  {CYAN}{:>5}{RESET}  {RED}{:>5}{RESET}  {due_color}{:>5}{RESET}",
@@ -387,7 +403,6 @@ pub fn print_overview(conn: &Connection, deck_filter: Option<&str>) {
             d.review,
             d.relearning,
             d.due_today,
-            name_width = name_width,
             due_color = due_color,
         );
         let new_w = if max_total > 0 {
@@ -431,42 +446,35 @@ pub fn print_overview(conn: &Connection, deck_filter: Option<&str>) {
     }
 }
 
-pub fn print_forecast(conn: &Connection, deck_filter: Option<&str>) {
-    let buckets = due_forecast(conn, deck_filter);
+pub fn print_forecast(data: &[ForecastBucket]) {
     print_header("Due Forecast");
 
-    let max_count = buckets.iter().map(|b| b.count).max().unwrap_or(1);
-    let label_width = buckets.iter().map(|b| b.label.len()).max().unwrap_or(10);
+    let max_count = data.iter().map(|b| b.count).max().unwrap_or(1);
+    let label_width = data.iter().map(|b| b.label.len()).max().unwrap_or(10);
     let bar_width = 40;
 
     let colors = [RED, YELLOW, YELLOW, GREEN, GREEN, CYAN, DIM];
 
-    for (i, bucket) in buckets.iter().enumerate() {
+    for (i, bucket) in data.iter().enumerate() {
         let color = colors.get(i).unwrap_or(&DIM);
         let bar = render_bar(bucket.count, max_count, bar_width, color);
-        println!(
-            "{:<label_width$}  {:>4}  {bar}",
-            bucket.label,
-            bucket.count,
-            label_width = label_width,
-        );
+        println!("{:<label_width$}  {:>4}  {bar}", bucket.label, bucket.count,);
     }
 }
 
-pub fn print_activity(conn: &Connection, deck_filter: Option<&str>) {
-    let activity = review_activity(conn, deck_filter, 30);
+pub fn print_activity(data: &[ReviewDay]) {
     print_header("Review Activity (last 30 days)");
 
-    if activity.is_empty() || activity.iter().all(|r| r.count == 0) {
+    if data.is_empty() || data.iter().all(|r| r.count == 0) {
         println!("{DIM}No reviews yet.{RESET}");
         return;
     }
 
-    let max_count = activity.iter().map(|r| r.count).max().unwrap_or(1);
+    let max_count = data.iter().map(|r| r.count).max().unwrap_or(1);
     let bar_width = 40;
 
-    let total: usize = activity.iter().map(|r| r.count).sum();
-    let active_days = activity.iter().filter(|r| r.count > 0).count();
+    let total: usize = data.iter().map(|r| r.count).sum();
+    let active_days = data.iter().filter(|r| r.count > 0).count();
     let avg = if active_days > 0 {
         total as f64 / active_days as f64
     } else {
@@ -476,7 +484,7 @@ pub fn print_activity(conn: &Connection, deck_filter: Option<&str>) {
     println!("{DIM}Total: {total}  |  Active days: {active_days}  |  Avg: {avg:.1}/day{RESET}");
     println!();
 
-    for r in &activity {
+    for r in data {
         let short_date = &r.date[5..];
         let color = if r.count == 0 {
             DIM
@@ -496,11 +504,10 @@ pub fn print_activity(conn: &Connection, deck_filter: Option<&str>) {
     }
 }
 
-pub fn print_ratings(conn: &Connection, deck_filter: Option<&str>) {
-    let dist = rating_distribution(conn, deck_filter);
+pub fn print_ratings(data: &[usize; 4]) {
     print_header("Rating Distribution");
 
-    let total: usize = dist.iter().sum();
+    let total: usize = data.iter().sum();
     if total == 0 {
         println!("{DIM}No reviews yet.{RESET}");
         return;
@@ -508,33 +515,32 @@ pub fn print_ratings(conn: &Connection, deck_filter: Option<&str>) {
 
     let labels = ["Again", "Hard ", "Good ", "Easy "];
     let colors = [RED, YELLOW, GREEN, CYAN];
-    let max_count = *dist.iter().max().unwrap_or(&1);
+    let max_count = *data.iter().max().unwrap_or(&1);
     let bar_width = 40;
 
-    for (i, (&count, label)) in dist.iter().zip(labels.iter()).enumerate() {
+    for (i, (&count, label)) in data.iter().zip(labels.iter()).enumerate() {
         let pct = count as f64 / total as f64 * 100.0;
         let bar = render_bar(count, max_count, bar_width, colors[i]);
         println!("{label}  {:>4}  [{pct:>5.1}%]  {bar}", count,);
     }
 }
 
-pub fn print_maturity(conn: &Connection, deck_filter: Option<&str>) -> Result<(), rusqlite::Error> {
-    let buckets = maturity_distribution(conn, deck_filter)?;
+pub fn print_maturity(data: &[(String, usize)]) {
     print_header("Card Maturity (stability)");
 
-    let total: usize = buckets.iter().map(|(_, c)| c).sum();
+    let total: usize = data.iter().map(|(_, c)| c).sum();
     if total == 0 {
         println!("{DIM}No cards.{RESET}");
-        return Ok(());
+        return;
     }
 
-    let max_count = buckets.iter().map(|(_, c)| *c).max().unwrap_or(1);
-    let label_width = buckets.iter().map(|(l, _)| l.len()).max().unwrap_or(10);
+    let max_count = data.iter().map(|(_, c)| *c).max().unwrap_or(1);
+    let label_width = data.iter().map(|(l, _)| l.len()).max().unwrap_or(10);
     let bar_width = 40;
 
     let colors = [DIM, RED, RED, YELLOW, YELLOW, GREEN, CYAN, MAGENTA];
 
-    for (i, (label, count)) in buckets.iter().enumerate() {
+    for (i, (label, count)) in data.iter().enumerate() {
         if *count == 0 {
             continue;
         }
@@ -543,27 +549,22 @@ pub fn print_maturity(conn: &Connection, deck_filter: Option<&str>) -> Result<()
         let bar = render_bar(*count, max_count, bar_width, color);
         println!(
             "{:<label_width$}  {:>4}  [{pct:>5.1}%]  {bar}",
-            label,
-            count,
-            label_width = label_width,
+            label, count,
         );
     }
-    Ok(())
 }
 
-pub fn run_all(conn: &Connection, deck_filter: Option<&str>) {
+pub fn display_all(data: &StatsData, deck_filter: Option<&str>) {
     let title = match deck_filter {
         Some(name) => format!("turbo-m stats — {name}"),
         None => "turbo-m stats".to_string(),
     };
     println!("{BOLD}{MAGENTA}{title}{RESET}");
 
-    print_overview(conn, deck_filter);
-    print_forecast(conn, deck_filter);
-    if let Err(e) = print_maturity(conn, deck_filter) {
-        eprintln!("Error displaying maturity stats: {e}");
-    }
-    print_activity(conn, deck_filter);
-    print_ratings(conn, deck_filter);
+    print_overview(&data.overview);
+    print_forecast(&data.forecast);
+    print_maturity(&data.maturity);
+    print_activity(&data.activity);
+    print_ratings(&data.ratings);
     println!();
 }

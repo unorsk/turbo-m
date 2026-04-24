@@ -1,0 +1,17 @@
+name = "turbo-m"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-04-01"
+
+[build]
+command = "cargo install worker-build && worker-build --release"
+
+# D1 Database - create with: wrangler d1 create turbo-m
+# Then fill in the database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "turbo-m"
+database_id = "f030e42d-88b4-4674-9478-aba5d846d9c2"
+
+# Set the API_TOKEN secret with: wrangler secret put API_TOKEN
+# Or for local dev, add to .dev.vars:
+#   API_TOKEN=your-dev-token

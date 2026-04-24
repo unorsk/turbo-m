@@ -16,4 +16,10 @@ pub enum AppError {
 
     #[error("Card not found: {0}")]
     CardNotFound(i64),
+
+    #[error("HTTP error: {0}")]
+    Http(String),
+
+    #[error("Remote API error ({status}): {message}")]
+    Remote { status: u16, message: String },
 }

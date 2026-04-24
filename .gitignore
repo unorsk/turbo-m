@@ -6,3 +6,7 @@ dist-newstyle
 # Added by cargo
 
 /target
+
+# Worker
+worker/.dev.vars
+worker/build/

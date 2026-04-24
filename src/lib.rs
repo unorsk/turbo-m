@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod client;
 pub mod engine;
 pub mod error;
 pub mod model;
@@ -11,13 +12,11 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde_json::Value;
 
+use cli::stats::StatsData;
 use error::AppError;
 use model::{CardDTO, Deck, HardestCardDTO, ImportResult, ReviewSubmission};
 
-/// Main entry point for the turbo-m library.
-///
-/// Wraps a SQLite connection and exposes all spaced-repetition operations.
-/// Can be used both from the CLI binary and as a library by a TUI/web frontend.
+/// Main entry point for the turbo-m library (local SQLite backend).
 pub struct TurboM {
     conn: Connection,
 }
@@ -63,17 +62,14 @@ impl TurboM {
 
     // ── Card operations ──────────────────────────────────────────────────
 
-    /// Add a single card to a deck. Returns the new card's ID.
     pub fn add_card(&self, deck_name: &str, content: Value) -> Result<i64, AppError> {
         storage::repo::add_card(&self.conn, deck_name, content)
     }
 
-    /// Add multiple cards to a deck in a single transaction. Returns their IDs.
     pub fn add_cards(&self, deck_name: &str, contents: Vec<Value>) -> Result<Vec<i64>, AppError> {
         storage::repo::add_cards(&self.conn, deck_name, contents)
     }
 
-    /// Import cards into a deck, skipping duplicates (matched by content JSON).
     pub fn import_cards(
         &self,
         deck_name: &str,
@@ -82,22 +78,18 @@ impl TurboM {
         storage::repo::import_cards(&self.conn, deck_name, contents)
     }
 
-    /// Fetch cards that are due for review (state != New, due <= now).
     pub fn fetch_due(&self, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
         storage::repo::fetch_due(&self.conn, deck_name, limit)
     }
 
-    /// Count cards that are due for review in a deck.
     pub fn count_due(&self, deck_name: &str) -> Result<u32, AppError> {
         storage::repo::count_due(&self.conn, deck_name)
     }
 
-    /// Fetch new (never-reviewed) cards for a warm-up session.
     pub fn fetch_new(&self, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
         storage::repo::fetch_new(&self.conn, deck_name, limit)
     }
 
-    /// Fetch the hardest cards in a deck, ranked by difficulty and lapses.
     pub fn fetch_hardest(
         &self,
         deck_name: &str,
@@ -106,10 +98,115 @@ impl TurboM {
         storage::repo::fetch_hardest(&self.conn, deck_name, limit)
     }
 
-    // ── Review operations ────────────────────────────────────────────────
-
-    /// Process review results from the TUI. Updates FSRS state and writes to revlog.
     pub fn process_reviews(&self, reviews: &[ReviewSubmission]) -> Result<(), AppError> {
         storage::repo::process_reviews(&self.conn, reviews)
+    }
+}
+
+/// Dispatch enum for local vs. remote backends.
+/// All data operations go through this so the CLI and drill module
+/// work identically regardless of backend.
+pub enum Backend {
+    Local(TurboM),
+    Remote(client::RemoteClient),
+}
+
+impl Backend {
+    pub fn create_deck(&self, name: &str, metadata: Value) -> Result<Deck, AppError> {
+        match self {
+            Backend::Local(tm) => tm.create_deck(name, metadata),
+            Backend::Remote(c) => c.create_deck(name, metadata),
+        }
+    }
+
+    pub fn list_decks(&self) -> Result<Vec<Deck>, AppError> {
+        match self {
+            Backend::Local(tm) => tm.list_decks(),
+            Backend::Remote(c) => c.list_decks(),
+        }
+    }
+
+    pub fn update_deck(
+        &self,
+        name: &str,
+        new_name: Option<&str>,
+        metadata: Option<Value>,
+        fsrs_params: Option<Value>,
+    ) -> Result<Deck, AppError> {
+        match self {
+            Backend::Local(tm) => tm.update_deck(name, new_name, metadata, fsrs_params),
+            Backend::Remote(c) => c.update_deck(name, new_name, metadata, fsrs_params),
+        }
+    }
+
+    pub fn add_card(&self, deck_name: &str, content: Value) -> Result<i64, AppError> {
+        match self {
+            Backend::Local(tm) => tm.add_card(deck_name, content),
+            Backend::Remote(c) => c.add_card(deck_name, content),
+        }
+    }
+
+    pub fn add_cards(&self, deck_name: &str, contents: Vec<Value>) -> Result<Vec<i64>, AppError> {
+        match self {
+            Backend::Local(tm) => tm.add_cards(deck_name, contents),
+            Backend::Remote(c) => c.add_cards(deck_name, contents),
+        }
+    }
+
+    pub fn import_cards(
+        &self,
+        deck_name: &str,
+        contents: Vec<Value>,
+    ) -> Result<ImportResult, AppError> {
+        match self {
+            Backend::Local(tm) => tm.import_cards(deck_name, contents),
+            Backend::Remote(c) => c.import_cards(deck_name, contents),
+        }
+    }
+
+    pub fn fetch_due(&self, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
+        match self {
+            Backend::Local(tm) => tm.fetch_due(deck_name, limit),
+            Backend::Remote(c) => c.fetch_due(deck_name, limit),
+        }
+    }
+
+    pub fn count_due(&self, deck_name: &str) -> Result<u32, AppError> {
+        match self {
+            Backend::Local(tm) => tm.count_due(deck_name),
+            Backend::Remote(c) => c.count_due(deck_name),
+        }
+    }
+
+    pub fn fetch_new(&self, deck_name: &str, limit: u32) -> Result<Vec<CardDTO>, AppError> {
+        match self {
+            Backend::Local(tm) => tm.fetch_new(deck_name, limit),
+            Backend::Remote(c) => c.fetch_new(deck_name, limit),
+        }
+    }
+
+    pub fn fetch_hardest(
+        &self,
+        deck_name: &str,
+        limit: u32,
+    ) -> Result<Vec<HardestCardDTO>, AppError> {
+        match self {
+            Backend::Local(tm) => tm.fetch_hardest(deck_name, limit),
+            Backend::Remote(c) => c.fetch_hardest(deck_name, limit),
+        }
+    }
+
+    pub fn process_reviews(&self, reviews: &[ReviewSubmission]) -> Result<(), AppError> {
+        match self {
+            Backend::Local(tm) => tm.process_reviews(reviews),
+            Backend::Remote(c) => c.process_reviews(reviews),
+        }
+    }
+
+    pub fn fetch_stats(&self, deck: Option<&str>) -> Result<StatsData, AppError> {
+        match self {
+            Backend::Local(tm) => Ok(cli::stats::fetch_stats(tm.conn(), deck)),
+            Backend::Remote(c) => c.fetch_stats(deck),
+        }
     }
 }
